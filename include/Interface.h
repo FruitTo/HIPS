@@ -6,23 +6,21 @@
 #include <string>
 #include <tins/tins.h>
 #include <sstream>
-using namespace std;
-using namespace Tins;
 
-vector<string> getInterface(){
-    vector<string> interface;
-    vector<NetworkInterface> iface = NetworkInterface::all();
+std::vector<std::string> getInterface(){
+    std::vector<std::string> interface;
+    std::vector<Tins::NetworkInterface> iface = Tins::NetworkInterface::all();
 
-    cout << "Your interface :";
+    std::cout << "Your interface :";
 
     for(const auto& i : iface){
-        cout << " " + i.name();
+        std::cout << " " + i.name();
     }
-    cout << endl << "Select your interface : ";
-    string input;
-    string word;
-    getline(cin, input);
-    istringstream iss(input);
+    std::cout << std::endl << "Select your interface : ";
+    std::string input;
+    std::string word;
+    std::getline(std::cin, input);
+    std::istringstream iss(input);
     while(iss >> word){
         interface.push_back(word);
     }
