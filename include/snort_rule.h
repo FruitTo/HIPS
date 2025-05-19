@@ -7,20 +7,60 @@
 #include <fstream>
 #include <sstream>
 
+struct Reference {
+    std::string scheme;
+    std::string id;
+};
+
+struct MetadataEntry {
+    std::string key;
+    std::string value;
+};
+
 struct GeneralOptions {
     std::string msg;
-    std::string reference;
+    std::vector<Reference> references;
     std::string sid;
     std::string rev;
     std::string classtype;
     std::string priority;
-    std::string metadata;
+    std::vector<MetadataEntry> metadata;
     std::string gid;
-    std::string service;
+    std::vector<std::string> services;
+};
+
+enum class FastPatternType {
+    None,
+    Normal,
+    Only,
+    OffsetLen
+};
+
+struct FastPatternOption {
+    FastPatternType type = FastPatternType::None;
+    int offset = -1;
+    int length = -1;
+};
+
+enum class EndianType {
+    None,
+    Little,
+    Big
+};
+
+struct ContentOption {
+    std::string pattern;
+    bool nocase = false;
+    std::vector<std::string> modifiers;
+    FastPatternOption fast_pattern;
+    int width = 1;
+    EndianType endian = EndianType::None;
+    bool oddw = false;
+    bool rawbytes = false;
 };
 
 struct PayloadOptions {
-    std::vector<std::string> content;
+    std::vector<ContentOption> contents;
     std::vector<std::string> pcre;
     std::vector<std::string> byte_test;
     std::vector<std::string> byte_jump;
