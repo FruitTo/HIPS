@@ -19,6 +19,8 @@ void sniff(const string &iface,Json::Value rules)
 {
     cout << rules[0]["header"].asString() << endl;
     cout << rules.size() << endl;
+
+    // Filter
     SnifferConfiguration config;
     config.set_promisc_mode(true);
     Sniffer sniffer(iface, config);
@@ -26,6 +28,10 @@ void sniff(const string &iface,Json::Value rules)
     sniffer.sniff_loop([iface](Packet &pkt){
         PDU *pdu = pkt.pdu();
         IP &ip = pdu->rfind_pdu<IP>();
+
+
+        // Flow
+
         cout << "[" << iface << "] ";
         cout << "SRC: " << ip.src_addr() << " DST: " << ip.dst_addr() << endl;
         return true; 
@@ -41,11 +47,10 @@ int main()
 
     vector<future<void>> task;
     for(const string &iface: interface){
-        task.push_back(pool.submit_task([iface,&rules]() {
+        task.push_back(pool.submit_task([iface,rules]() {
             sniff(iface,rules);
         }));
     }
-
 
     return 0;
 }
