@@ -31,15 +31,15 @@ void sniff(const string &iface)
 
 int main()
 {
-    vector<string> interface = getInterface();
-    thread_pool pool(interface.size());
+    // vector<string> interface = getInterface();
+    // thread_pool pool(interface.size());
 
-    vector<future<void>> task;
-    for(const string &iface: interface){
-        task.push_back(pool.submit_task([iface]() {
-            sniff(iface);
-        }));
-    }
+    // vector<future<void>> task;
+    // for(const string &iface: interface){
+    //     task.push_back(pool.submit_task([iface]() {
+    //         sniff(iface);
+    //     }));
+    // }
 
     return 0;
 }
