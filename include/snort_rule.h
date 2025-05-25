@@ -1,37 +1,20 @@
 #ifndef SNORT_RULE_H
 #define SNORT_RULE_H
 
-#pragma once
-#include <iostream>
-#include <string>
-#include <vector>
-#include <variant>
-#include <unordered_map>
-#include <regex>
+#include <json/json.h>
 #include <fstream>
 #include <sstream>
-#include <optional>
-#include <cstdint>
+#include <iostream>
+#include <string>
 
-enum class ipFormat {
-    static,
-    subnet,
-    any,
-    variable
+inline Json::Value readRule()
+{
+    std::ifstream rule_file("snortparser/rules.json", std::ifstream::binary);
+    Json::Value rules;
+    Json::CharReaderBuilder builder;
+    std::string errs;
+    Json::parseFromStream(builder, rule_file, &rules, &errs);
+    return rules;
 }
-
-struct IP {
-    switch (ipFormat){
-
-    }
-}
-
-struct Rule {
-    string action;
-    string protocal;
-    IP ip;
-}
-
-
 
 #endif

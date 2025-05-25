@@ -13,7 +13,7 @@ OUTPUT_FILE="${SOURCE_FILE%.cpp}"
 # Compiler and flags
 CXX=g++
 CXX_FLAGS="-std=c++17" # use C++17 for modern features
-LIB_FLAGS="-ltins -lpcap -lssl"
+LIB_FLAGS="-ltins -lpcap -lssl -ljsoncpp"
 
 # Compile the source file
 $CXX $CXX_FLAGS "$SOURCE_FILE" -o "$OUTPUT_FILE" $LIB_FLAGS

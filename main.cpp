@@ -6,6 +6,7 @@
 #include <iostream>
 #include <tins/tins.h>
 #include <vector>
+#include <json/json.h>
 #include <sstream>
 #include <chrono>
 
@@ -14,8 +15,10 @@ using namespace Tins;
 using namespace BS;
 using namespace chrono;
 
-void sniff(const string &iface)
+void sniff(const string &iface,Json::Value rules)
 {
+    cout << rules[0]["header"].asString() << endl;
+    cout << rules.size() << endl;
     SnifferConfiguration config;
     config.set_promisc_mode(true);
     Sniffer sniffer(iface, config);
@@ -31,15 +34,18 @@ void sniff(const string &iface)
 
 int main()
 {
-    // vector<string> interface = getInterface();
-    // thread_pool pool(interface.size());
+    Json::Value rules = readRule();
 
-    // vector<future<void>> task;
-    // for(const string &iface: interface){
-    //     task.push_back(pool.submit_task([iface]() {
-    //         sniff(iface);
-    //     }));
-    // }
+    vector<string> interface = getInterface();
+    thread_pool pool(interface.size());
+
+    vector<future<void>> task;
+    for(const string &iface: interface){
+        task.push_back(pool.submit_task([iface,&rules]() {
+            sniff(iface,rules);
+        }));
+    }
+
 
     return 0;
 }
