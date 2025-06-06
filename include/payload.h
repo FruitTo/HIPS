@@ -1,18 +1,16 @@
-#ifndef PAYLAOD_H
+#ifndef PAYLOAD_H
 #define PAYLOAD_H
 #include <string>
 #include <vector>
 #include <optional>
 #include <cstdint>
 #include "./dto.h"
-#include "./payload.h"
-#include "./none_payload.h"
 
 
 // Content and Pattern Matching
 struct Content
 {
-   Buffer http = Buffer::NONE;
+   Buffer buffer = Buffer::NONE;
    bool negate = false;
    std::string content;
 
@@ -49,14 +47,14 @@ struct PCRE {
 
 // Size and Position Checks
 struct BufferLen {
-   Operator operator;
+   Operator op;
    uint32_t min_value;
    std::optional<uint32_t> max_value;
    bool relative = false;
 };
 
 struct Dsize {
-   Operator operator;
+   Operator op;
    uint16_t min_value;
    std::optional<uint16_t> max_value; 
 };
@@ -85,7 +83,7 @@ struct ByteExtract {
 
 struct ByteTest {
    uint8_t count;
-   ByteTestOperator operator;
+   ByteTestOperator op;
    bool negate = false;
    std::string compare_value;
    std::string offset;

@@ -8,7 +8,6 @@
 #include "./payload.h"
 #include "./none_payload.h"
 
-// Basic Structs
 struct NetworkConfig
 {
    std::optional<std::string> EXTERNAL_NET;
