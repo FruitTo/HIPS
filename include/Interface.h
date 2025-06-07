@@ -7,7 +7,7 @@
 #include <tins/tins.h>
 #include <sstream>
 
-std::vector<std::string> getInterface(){
+std::vector<std::string> getInterfaceName(){
     std::vector<std::string> interface;
     std::vector<Tins::NetworkInterface> iface = Tins::NetworkInterface::all();
 
@@ -25,6 +25,18 @@ std::vector<std::string> getInterface(){
         interface.push_back(word);
     }
     return interface;
+}
+
+std::string getIpInterface(std::string name){
+    try {
+        Tins::NetworkInterface iface(name);
+        return iface.ipv4_address().to_string();
+    }
+    catch (const std::exception& error) {
+        std::cerr << "Error getting IP for interface " << name 
+                  << ": " << error.what() << std::endl;
+        return "";  // Return empty string on error
+    }
 }
 
 #endif

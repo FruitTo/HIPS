@@ -18,30 +18,30 @@ int main()
         return 1;
     }
 
-    if (rules.count("tcp") > 0 && !rules["tcp"].empty())
+    if (rules.count("ssl") > 0 && !rules["ssl"].empty())
     {
-        cout << *rules["tcp"][0].action << endl;
+        cout << *rules["ssl"][0].action << endl;
     }
 
-    if (rules.count("tcp") > 0 && !rules["tcp"].empty())
+    if (rules.count("ssl") > 0 && !rules["ssl"].empty())
     {
-        cout << static_cast<int>(rules["tcp"][0].option.general.classtype) << endl;
+        cout << static_cast<int>(rules["ssl"][0].option.general.classtype) << endl;
     }
 
-    if (rules.count("tcp") > 0 && rules["tcp"].size() > 76)
+    if (rules.count("ssl") > 0 && rules["ssl"].size() > 76)
     {
-        if (rules["tcp"][76].option.nonpayload.ip_proto)
+        if (rules["ssl"][76].option.nonpayload.ip_proto)
         {
-            cout << static_cast<int>(get<uint8_t>(rules["tcp"][76].option.nonpayload.ip_proto->protocol));
+            cout << static_cast<int>(get<uint8_t>(rules["ssl"][0].option.nonpayload.ip_proto->protocol));
         }
     }
 
-    if (rules.count("tcp") > 0 && rules["tcp"].size() > 59)
+    if (rules.count("ssl") > 0 && rules["ssl"].size() > 0)
     {
-        if (rules["tcp"][59].option.nonpayload.flow &&
-            rules["tcp"][59].option.nonpayload.flow->connection_state)
+        if (rules["ssl"][0].option.nonpayload.flow &&
+            rules["ssl"][0].option.nonpayload.flow->connection_state)
         {
-            auto state = *rules["tcp"][59].option.nonpayload.flow->connection_state;
+            auto state = *rules["ssl"][0].option.nonpayload.flow->connection_state;
             cout << "Connection State: " << static_cast<int>(state) << endl;
         }
     }

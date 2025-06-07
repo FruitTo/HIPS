@@ -8,21 +8,19 @@
 #include "./payload.h"
 #include "./none_payload.h"
 
-struct NetworkConfig
-{
+struct NetworkConfig {
+   std::optional<std::string> HOME_NET;           
    std::optional<std::string> EXTERNAL_NET;
-   std::optional<std::string> FILE_DATA_PORTS;
-   std::optional<std::string> FTP_PORTS;
-   std::optional<std::string> HOME_NET;
-   std::optional<std::string> HTTP_PORTS;
-   std::optional<std::string> HTTP_SERVERS;
-   std::optional<std::string> ORACLE_PORTS;
-   std::optional<std::string> SMTP_SERVERS;
-   std::optional<std::string> SQL_SERVERS;
-   std::optional<std::string> SSH_PORTS;
-   std::optional<std::string> TELNET_SERVERS;
+   std::vector<std::string> HTTP_PORTS = {"80","443","8080","8443"};
+   std::vector<std::string> SSH_PORTS = {"22","2222"};  
+   std::vector<std::string> FTP_PORTS = {"21","2021"};
+   std::vector<std::string> ORACLE_PORTS = {"1521","1522"};
+   std::vector<std::string> FILE_DATA_PORTS = {"143","993","110","995"}; 
+   std::optional<bool> HTTP_SERVERS;       
+   std::optional<bool> SMTP_SERVERS;       
+   std::optional<bool> SQL_SERVERS;        
+   std::optional<bool> TELNET_SERVERS;    
 };
-
 
 struct GeneralOption
 {
