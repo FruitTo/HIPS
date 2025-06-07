@@ -27,10 +27,10 @@ void sniff(const string &iface)
 
     filesystem::create_directories(currentPath);
     // Auto remove when it out of scope.
-    auto writer = make_unique<PacketWriter>( currentPath + iface + "-" + currentDay + ".pcap", DataLinkType<EthernetII>()); 
+    auto writer = make_unique<PacketWriter>(currentPath + iface + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
 
-    sniffer.sniff_loop([&writer,iface,&currentDay,&currentPath](Packet &pkt)
-    {
+    sniffer.sniff_loop([&writer, iface, &currentDay, &currentPath](Packet &pkt)
+                       {
         // Write logs.
         string date = currentDate();
         string path = getPath();
@@ -49,12 +49,26 @@ void sniff(const string &iface)
         // Filter
         PDU *pdu = pkt.pdu();
         IP &ip = pdu->rfind_pdu<IP>();
+        string protocol;
+        if (pdu->find_pdu<IP>()) {
+            protocol = "ip";
+            if (pdu->find_pdu<TCP>()) {
+                TCP &tcp = pdu->rfind_pdu<TCP>();
+                protocol = "tcp";
+                if(tcp.sport() == 80 || tcp.dport() == 80 || tcp.sport() == 8080 || tcp.dport() == 8080){
+                    protocol = "http";
+                }
+            } else if (pdu->find_pdu<UDP>()) {
+                protocol = "udp";
+            } else if (pdu->find_pdu<ICMP>()) {
+                protocol = "icmp";
+            }  
+        } 
 
         // Flow
         cout << "[" << iface << "] ";
-        cout << "SRC: " << ip.src_addr() << " DST: " << ip.dst_addr() << endl;
-        return true; 
-    });
+        cout << "Protocol: " << protocol << " SRC: " << ip.src_addr() << " DST: " << ip.dst_addr() << endl;
+        return true; });
 }
 
 int main()
@@ -65,7 +79,8 @@ int main()
     vector<future<void>> task;
     for (const string &iface : interface)
     {
-        task.push_back(pool.submit_task([iface](){ sniff(iface); }));
+        task.push_back(pool.submit_task([iface]()
+                                        { sniff(iface); }));
     }
 
     return 0;
