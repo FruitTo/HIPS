@@ -16,7 +16,7 @@ using namespace Tins;
 using namespace BS;
 using namespace chrono;
 
-void sniff(const string &iface,auto &conf)
+void sniff(const string &iface, auto &conf)
 {
     // Config
     SnifferConfiguration config;
@@ -30,6 +30,7 @@ void sniff(const string &iface,auto &conf)
     // Auto remove when it out of scope.
     auto writer = make_unique<PacketWriter>(currentPath + iface + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
 
+    cout << *conf.HOME_NET << endl;
     sniffer.sniff_loop([&writer, iface, &currentDay, &currentPath](Packet &pkt)
                        {
         // Write logs.
@@ -47,31 +48,27 @@ void sniff(const string &iface,auto &conf)
         }
         writer->write(pkt);
 
-
         // Filter
         PDU *pdu = pkt.pdu();
-        IP &ip = pdu->rfind_pdu<IP>();
-        TCP &tcp = pdu->rfind_pdu<TCP>();
         string protocol;
         if (pdu->find_pdu<IP>()) {
+            IP &ip = pdu->rfind_pdu<IP>();
             protocol = "ip";
-            Rule packet;
-            packet.protocol = protocol;
             if (pdu->find_pdu<TCP>()) {
+                TCP &tcp = pdu->rfind_pdu<TCP>();
                 protocol = "tcp";
-                if(tcp.sport() == 80 || tcp.dport() == 80 || tcp.sport() == 8080 || tcp.dport() == 8080){
-                    protocol = "http";
-                }
-            } else if (pdu->find_pdu<UDP>()) {
-                protocol = "udp";
-            } else if (pdu->find_pdu<ICMP>()) {
-                protocol = "icmp";
-            }  
-        } 
-
-        // Flow
+            if(tcp.sport() == 80 || tcp.dport() == 80 || tcp.sport() == 8080 || tcp.dport() == 8080){
+                protocol = "http";
+            }
+        } else if (pdu->find_pdu<UDP>()) {
+            protocol = "udp";
+        } else if (pdu->find_pdu<ICMP>()) {
+            protocol = "icmp";
+        }
+    
         cout << "[" << iface << "] ";
         cout << "Protocol: " << protocol << " SRC: " << ip.src_addr() << " DST: " << ip.dst_addr() << endl;
+    }
         return true; });
 }
 
@@ -133,8 +130,8 @@ int main()
         {
             conf.TELNET_SERVERS = false;
         }
-        task.push_back(pool.submit_task([iface,conf]()
-                                        { sniff(iface,conf); }));
+        task.push_back(pool.submit_task([iface, conf]()
+                                        { sniff(iface, conf); }));
     }
 
     return 0;
