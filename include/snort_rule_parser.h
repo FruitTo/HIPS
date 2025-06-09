@@ -520,6 +520,10 @@ private:
         {
             current_buffer = Buffer::HTTP_TRUE_IP;
         }
+        else if (option_name == "http_raw_header")
+        {
+            current_buffer = Buffer::HTTP_RAW_HEADER;
+        }
         else if (option_name == "file_data")
         {
             current_buffer = Buffer::FILE_DATA;
@@ -536,6 +540,44 @@ private:
         {
             current_buffer = Buffer::BASE64_DATA;
         }
+        else if (option_name == "dce_iface")
+        {
+            current_buffer = Buffer::DCE_IFACE;
+        }
+        else if (option_name == "dce_opnum")
+        {
+            current_buffer = Buffer::DCE_OPNUM;
+        }
+        else if (option_name == "dce_stub_data")
+        {
+            current_buffer = Buffer::DCE_STUB_DATA;
+        }
+        else if (option_name == "sip_header")
+        {
+            current_buffer = Buffer::SIP_HEADER;
+        }
+        else if (option_name == "sip_body")
+        {
+            current_buffer = Buffer::SIP_BODY;
+        }
+        else if (option_name == "sip_body")
+{
+    current_buffer = Buffer::SIP_BODY;
+}
+// เพิ่มตรงนี้ (ประมาณบรรทัด 516)
+else if (option_name == "ssl_state" && option_value.empty())
+{
+    current_buffer = Buffer::SSL_STATE;
+}
+else if (option_name == "ssl_version" && option_value.empty())
+{
+    current_buffer = Buffer::SSL_VERSION;
+}
+// Parse content options with modifiers
+else if (option_name == "content")
+{
+    parseContentWithModifiers(option_value, rule_option.payload);
+}
         // Parse content options with modifiers
         else if (option_name == "content")
         {
@@ -685,6 +727,14 @@ private:
                 }
                 rule_option.payload.ber_skip_list->push_back(ber_skip);
             }
+        }
+        else if (option_name == "ssl_state")
+        {
+            parseSSLStateOption(option_value, rule_option.payload);
+        }
+        else if (option_name == "ssl_version")
+        {
+            parseSSLVersionOption(option_value, rule_option.payload);
         }
         // Parse flow options
         else if (option_name == "flow")
@@ -884,6 +934,24 @@ private:
                 if (std::regex_match(modifier, within_match, within_regex))
                 {
                     content.within = std::stoi(within_match[1].str());
+                }
+            }
+            else if (modifier == "big" || modifier == "endian big")
+            {
+                content.endian = Endianness::BIG;
+            }
+            else if (modifier == "little" || modifier == "endian little")
+            {
+                content.endian = Endianness::LITTLE;
+            }
+            else if (modifier.find("width") == 0)
+            {
+                // Parse width value: width 8/16/32
+                std::regex width_regex(R"(^width\s+(\d+)$)");
+                std::smatch width_match;
+                if (std::regex_match(modifier, width_match, width_regex))
+                {
+                    content.width = parseWidth(width_match[1].str());
                 }
             }
         }
@@ -1392,45 +1460,115 @@ private:
         payload.base64_decode = base64_decode;
     }
 
-    static void parseFlowOption(const std::string &value, NonePayloadOption &nonpayload)
-{
-    FlowOption flow;
-    std::stringstream ss(value);
-    std::string item;
-
-    while (std::getline(ss, item, ','))
+    static void parseSSLStateOption(const std::string &value, PayloadOption &payload)
     {
-        item = trim(item);
-
-        if (item == "established")
-            flow.connection_state = FlowOption::ConnectionState::ESTABLISHED;
-        else if (item == "not_established")
-            flow.connection_state = FlowOption::ConnectionState::NOT_ESTABLISHED;
-        else if (item == "stateless")
-            flow.connection_state = FlowOption::ConnectionState::STATELESS;
+        SSLStateOption ssl_state;
+        
+        // Check for negation
+        std::string state_str = value;
+        if (!state_str.empty() && state_str[0] == '!')
+        {
+            ssl_state.negate = true;
+            state_str = state_str.substr(1);
+        }
+        
+        // Parse comma-separated states
+        std::stringstream ss(state_str);
+        std::string state;
+        
+        while (std::getline(ss, state, ','))
+        {
+            state = trim(state);
             
-        else if (item == "to_client")
-            flow.direction = FlowOption::Direction::TO_CLIENT;
-        else if (item == "to_server")
-            flow.direction = FlowOption::Direction::TO_SERVER;
-        else if (item == "from_client")
-            flow.direction = FlowOption::Direction::FROM_CLIENT;
-        else if (item == "from_server")
-            flow.direction = FlowOption::Direction::FROM_SERVER;
-            
-        else if (item == "no_stream")
-            flow.stream_mode = FlowOption::StreamMode::NO_STREAM;
-        else if (item == "only_stream")
-            flow.stream_mode = FlowOption::StreamMode::ONLY_STREAM;
-            
-        else if (item == "no_frag")
-            flow.fragment_mode = FlowOption::FragmentMode::NO_FRAG;
-        else if (item == "only_frag")
-            flow.fragment_mode = FlowOption::FragmentMode::ONLY_FRAG;
+            if (state == "client_hello")
+                ssl_state.states.push_back(SSLState::CLIENT_HELLO);
+            else if (state == "server_hello")
+                ssl_state.states.push_back(SSLState::SERVER_HELLO);
+            else if (state == "client_keyx")
+                ssl_state.states.push_back(SSLState::CLIENT_KEYX);
+            else if (state == "server_keyx")
+                ssl_state.states.push_back(SSLState::SERVER_KEYX);
+            else if (state == "unknown")
+                ssl_state.states.push_back(SSLState::UNKNOWN);
+        }
+        
+        payload.ssl_state = ssl_state;
     }
 
-    nonpayload.flow = flow;
-}
+    static void parseSSLVersionOption(const std::string &value, PayloadOption &payload)
+    {
+        SSLVersionOption ssl_version;
+        
+        // Check for negation
+        std::string version_str = value;
+        if (!version_str.empty() && version_str[0] == '!')
+        {
+            ssl_version.negate = true;
+            version_str = version_str.substr(1);
+        }
+        
+        // Parse comma-separated versions
+        std::stringstream ss(version_str);
+        std::string version;
+        
+        while (std::getline(ss, version, ','))
+        {
+            version = trim(version);
+            
+            if (version == "sslv2")
+                ssl_version.versions.push_back(SSLVersion::SSLV2);
+            else if (version == "sslv3")
+                ssl_version.versions.push_back(SSLVersion::SSLV3);
+            else if (version == "tls1.0")
+                ssl_version.versions.push_back(SSLVersion::TLS1_0);
+            else if (version == "tls1.1")
+                ssl_version.versions.push_back(SSLVersion::TLS1_1);
+            else if (version == "tls1.2")
+                ssl_version.versions.push_back(SSLVersion::TLS1_2);
+        }
+        
+        payload.ssl_version = ssl_version;
+    }
+
+    static void parseFlowOption(const std::string &value, NonePayloadOption &nonpayload)
+    {
+        FlowOption flow;
+        std::stringstream ss(value);
+        std::string item;
+
+        while (std::getline(ss, item, ','))
+        {
+            item = trim(item);
+
+            if (item == "established")
+                flow.connection_state = FlowOption::ConnectionState::ESTABLISHED;
+            else if (item == "not_established")
+                flow.connection_state = FlowOption::ConnectionState::NOT_ESTABLISHED;
+            else if (item == "stateless")
+                flow.connection_state = FlowOption::ConnectionState::STATELESS;
+                
+            else if (item == "to_client")
+                flow.direction = FlowOption::Direction::TO_CLIENT;
+            else if (item == "to_server")
+                flow.direction = FlowOption::Direction::TO_SERVER;
+            else if (item == "from_client")
+                flow.direction = FlowOption::Direction::FROM_CLIENT;
+            else if (item == "from_server")
+                flow.direction = FlowOption::Direction::FROM_SERVER;
+                
+            else if (item == "no_stream")
+                flow.stream_mode = FlowOption::StreamMode::NO_STREAM;
+            else if (item == "only_stream")
+                flow.stream_mode = FlowOption::StreamMode::ONLY_STREAM;
+                
+            else if (item == "no_frag")
+                flow.fragment_mode = FlowOption::FragmentMode::NO_FRAG;
+            else if (item == "only_frag")
+                flow.fragment_mode = FlowOption::FragmentMode::ONLY_FRAG;
+        }
+
+        nonpayload.flow = flow;
+    }
 
     static void parseFlowBitsOption(const std::string &value, NonePayloadOption &nonpayload)
     {
