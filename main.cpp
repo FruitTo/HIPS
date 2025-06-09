@@ -71,6 +71,20 @@ void sniff(const string &iface, auto &conf)
             if (pdu->find_pdu<TCP>()) {
                 TCP &tcp = pdu->rfind_pdu<TCP>();
                 packet.protocol = "tcp";
+                packet.tcp.emplace();
+                packet.tcp->sport = tcp.sport();
+                packet.tcp->dport = tcp.dport();
+                packet.tcp->seq = tcp.seq();
+                packet.tcp->ack_seq = tcp.ack_seq();
+                packet.tcp->flags.fin = tcp.get_flag(TCP::Flags::FIN);
+                packet.tcp->flags.syn = tcp.get_flag(TCP::Flags::SYN);
+                packet.tcp->flags.rst = tcp.get_flag(TCP::Flags::RST);
+                packet.tcp->flags.psh = tcp.get_flag(TCP::Flags::PSH);
+                packet.tcp->flags.ack = tcp.get_flag(TCP::Flags::ACK);
+                packet.tcp->flags.urg = tcp.get_flag(TCP::Flags::URG);
+                packet.tcp->flags.ece = tcp.get_flag(TCP::Flags::ECE);
+                packet.tcp->flags.cwr = tcp.get_flag(TCP::Flags::CWR);
+
                 if(tcp.sport() == 80 || tcp.dport() == 80 || 
                     tcp.sport() == 8080 || tcp.dport() == 8080) {
                     packet.protocol = "http";

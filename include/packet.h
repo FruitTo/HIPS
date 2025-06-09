@@ -23,7 +23,7 @@ enum class StreamMode {
     ONLY_STREAM        // ใช้เฉพาะ reassembled stream
 };
 
-struct TCPFlags {
+struct TCPFlagsInfo {
     bool fin = false;    // F - Finish
     bool syn = false;    // S - Synchronize  
     bool rst = false;    // R - Reset
@@ -34,8 +34,8 @@ struct TCPFlags {
     bool cwr = false;    // C - Congestion Window Reduced
 };
 
-struct TCP {
-    TCPFlags flags;
+struct TCPInfo {
+    TCPFlagsInfo flags;
     std::string sport;
     std::string dport;
     std::string seq;
@@ -58,7 +58,7 @@ struct PacketInfo {
     std::string src_addr;
     std::string dst_addr;
     
-    std::optional<TCP> tcp;
+    std::optional<TCPInfo> tcp;
     
     FlowInfo flow;
 };
