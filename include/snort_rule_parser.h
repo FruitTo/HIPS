@@ -1393,64 +1393,44 @@ private:
     }
 
     static void parseFlowOption(const std::string &value, NonePayloadOption &nonpayload)
+{
+    FlowOption flow;
+    std::stringstream ss(value);
+    std::string item;
+
+    while (std::getline(ss, item, ','))
     {
-        FlowOption flow;
+        item = trim(item);
 
-        std::stringstream ss(value);
-        std::string item;
-
-        while (std::getline(ss, item, ','))
-        {
-            item = trim(item);
-
-            if (item == "established")
-            {
-                flow.connection_state = FlowOption::ConnectionState::ESTABLISHED;
-            }
-            else if (item == "not_established")
-            {
-                flow.connection_state = FlowOption::ConnectionState::NOT_ESTABLISHED;
-            }
-            else if (item == "stateless")
-            {
-                flow.connection_state = FlowOption::ConnectionState::STATELESS;
-            }
-            else if (item == "to_client")
-            {
-                flow.direction = FlowOption::Direction::TO_CLIENT;
-            }
-            else if (item == "to_server")
-            {
-                flow.direction = FlowOption::Direction::TO_SERVER;
-            }
-            else if (item == "from_client")
-            {
-                flow.direction = FlowOption::Direction::FROM_CLIENT;
-            }
-            else if (item == "from_server")
-            {
-                flow.direction = FlowOption::Direction::FROM_SERVER;
-            }
-            else if (item == "no_stream")
-            {
-                flow.stream_mode = FlowOption::StreamMode::NO_STREAM;
-            }
-            else if (item == "only_stream")
-            {
-                flow.stream_mode = FlowOption::StreamMode::ONLY_STREAM;
-            }
-            else if (item == "no_frag")
-            {
-                flow.fragment_mode = FlowOption::FragmentMode::NO_FRAG;
-            }
-            else if (item == "only_frag")
-            {
-                flow.fragment_mode = FlowOption::FragmentMode::ONLY_FRAG;
-            }
-        }
-
-        nonpayload.flow = flow;
+        if (item == "established")
+            flow.connection_state = FlowOption::ConnectionState::ESTABLISHED;
+        else if (item == "not_established")
+            flow.connection_state = FlowOption::ConnectionState::NOT_ESTABLISHED;
+        else if (item == "stateless")
+            flow.connection_state = FlowOption::ConnectionState::STATELESS;
+            
+        else if (item == "to_client")
+            flow.direction = FlowOption::Direction::TO_CLIENT;
+        else if (item == "to_server")
+            flow.direction = FlowOption::Direction::TO_SERVER;
+        else if (item == "from_client")
+            flow.direction = FlowOption::Direction::FROM_CLIENT;
+        else if (item == "from_server")
+            flow.direction = FlowOption::Direction::FROM_SERVER;
+            
+        else if (item == "no_stream")
+            flow.stream_mode = FlowOption::StreamMode::NO_STREAM;
+        else if (item == "only_stream")
+            flow.stream_mode = FlowOption::StreamMode::ONLY_STREAM;
+            
+        else if (item == "no_frag")
+            flow.fragment_mode = FlowOption::FragmentMode::NO_FRAG;
+        else if (item == "only_frag")
+            flow.fragment_mode = FlowOption::FragmentMode::ONLY_FRAG;
     }
+
+    nonpayload.flow = flow;
+}
 
     static void parseFlowBitsOption(const std::string &value, NonePayloadOption &nonpayload)
     {
