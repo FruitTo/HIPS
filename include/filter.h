@@ -2,12 +2,56 @@
 #define FILTER_H
 #include "packet.h"
 #include <chrono>
+#include <curl/curl.h>
 #include <filesystem>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <tins/tins.h>
 #include <vector>
+
+std::string url_encode(const std::string &str) {
+  std::ostringstream encoded;
+  encoded.fill('0');
+  encoded << std::hex;
+
+  for (char c : str) {
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded << c;
+    } else {
+      encoded << '%' << std::setw(2) << int((unsigned char)c);
+    }
+  }
+  return encoded.str();
+}
+
+std::string url_decode(const std::string &str) {
+  std::string decoded;
+  for (size_t i = 0; i < str.length(); ++i) {
+    if (str[i] == '%' && i + 2 < str.length()) {
+      int hex_value;
+      std::istringstream hex_stream(str.substr(i + 1, 2));
+      hex_stream >> std::hex >> hex_value;
+      decoded += static_cast<char>(hex_value);
+      i += 2;
+    } else if (str[i] == '+') {
+      decoded += ' ';
+    } else {
+      decoded += str[i];
+    }
+  }
+  return decoded;
+}
+
+std::string Match(std::string request, std::regex reg) {
+  std::smatch match;
+  if (std::regex_search(request, match, reg)) {
+    std::string url = match[1].str();
+    return url;
+  }
+  return "";
+}
 
 void IPFilter(PacketInfo *packet, Tins::IP &ip) {
   packet->timestamp = std::chrono::system_clock::now();
@@ -81,34 +125,260 @@ void HTTPFilter(PacketInfo *packet, Tins::TCP &tcp) {
   if (tcp.inner_pdu() && tcp.inner_pdu()->size() > 0) {
     std::vector<uint8_t> raw_bytes = tcp.inner_pdu()->serialize();
     std::string http_content(raw_bytes.begin(), raw_bytes.end());
-    // Method
     if (http_content.find("GET ") == 0) {
       packet->http->method = "GET";
+      std::regex reg("^GET\\s+([^\\s]+)\\s+HTTP");
+      std::string extracted_uri = Match(http_content, reg);
+      packet->http->raw_uri = extracted_uri;
+      packet->http->uri = url_decode(extracted_uri);
+
+      size_t body_start = http_content.find("\r\n\r\n");
+      if (body_start != std::string::npos) {
+        std::string headers = http_content.substr(0, body_start);
+        packet->http->raw_headers = headers;
+        std::string body = http_content.substr(body_start + 4);
+
+        if (!body.empty()) {
+          packet->http->client_body = body;
+        }
+
+        if ((headers.find("Cookie:") != std::string::npos) ||
+            (headers.find("Set-Cookie:") != std::string::npos)) {
+          std::regex cookie_regex("Cookie:\\s*([^\\r\\n]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, cookie_regex)) {
+            packet->http->raw_cookie = match[1].str();
+          } else {
+            std::regex setcookie_regex("Set-Cookie:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, setcookie_regex)) {
+              packet->http->raw_cookie = match[1].str();
+            }
+          }
+        }
+
+        if ((headers.find("X-Forwarded-For:") != std::string::npos) ||
+            (headers.find("X-Real-IP:") != std::string::npos)) {
+          std::regex xff_regex("X-Forwarded-For:\\s*([^\\r\\n,]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, xff_regex)) {
+            packet->http->true_ip = match[1].str();
+          } else {
+            std::regex realip_regex("X-Real-IP:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, realip_regex)) {
+              packet->http->true_ip = match[1].str();
+            }
+          }
+        }
+      }
     } else if (http_content.find("POST ") == 0) {
       packet->http->method = "POST";
+      std::regex reg("^POST\\s+([^\\s]+)\\s+HTTP");
+      std::string extracted_uri = Match(http_content, reg);
+      packet->http->raw_uri = extracted_uri;
+      packet->http->uri = url_decode(extracted_uri);
+      size_t body_start = http_content.find("\r\n\r\n");
+      if (body_start != std::string::npos) {
+        std::string headers = http_content.substr(0, body_start);
+        packet->http->raw_headers = headers;
+        std::string body = http_content.substr(body_start + 4);
+
+        if (!body.empty()) {
+          packet->http->client_body = body;
+        }
+
+        if ((headers.find("Cookie:") != std::string::npos) ||
+            (headers.find("Set-Cookie:") != std::string::npos)) {
+          std::regex cookie_regex("Cookie:\\s*([^\\r\\n]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, cookie_regex)) {
+            packet->http->raw_cookie = match[1].str();
+          } else {
+            std::regex setcookie_regex("Set-Cookie:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, setcookie_regex)) {
+              packet->http->raw_cookie = match[1].str();
+            }
+          }
+        }
+        if ((headers.find("X-Forwarded-For:") != std::string::npos) ||
+            (headers.find("X-Real-IP:") != std::string::npos)) {
+          std::regex xff_regex("X-Forwarded-For:\\s*([^\\r\\n,]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, xff_regex)) {
+            packet->http->true_ip = match[1].str();
+          } else {
+            std::regex realip_regex("X-Real-IP:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, realip_regex)) {
+              packet->http->true_ip = match[1].str();
+            }
+          }
+        }
+      }
+
     } else if (http_content.find("PUT ") == 0) {
       packet->http->method = "PUT";
+      std::regex reg("^PUT\\s+([^\\s]+)\\s+HTTP");
+      std::string extracted_uri = Match(http_content, reg);
+      packet->http->raw_uri = extracted_uri;
+      packet->http->uri = url_decode(extracted_uri);
+      size_t body_start = http_content.find("\r\n\r\n");
+      if (body_start != std::string::npos) {
+        std::string headers = http_content.substr(0, body_start);
+        packet->http->raw_headers = headers;
+        std::string body = http_content.substr(body_start + 4);
+
+        if (!body.empty()) {
+          packet->http->client_body = body;
+        }
+
+        if ((headers.find("Cookie:") != std::string::npos) ||
+            (headers.find("Set-Cookie:") != std::string::npos)) {
+          std::regex cookie_regex("Cookie:\\s*([^\\r\\n]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, cookie_regex)) {
+            packet->http->raw_cookie = match[1].str();
+          } else {
+            std::regex setcookie_regex("Set-Cookie:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, setcookie_regex)) {
+              packet->http->raw_cookie = match[1].str();
+            }
+          }
+        }
+
+        if ((headers.find("X-Forwarded-For:") != std::string::npos) ||
+            (headers.find("X-Real-IP:") != std::string::npos)) {
+          std::regex xff_regex("X-Forwarded-For:\\s*([^\\r\\n,]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, xff_regex)) {
+            packet->http->true_ip = match[1].str();
+          } else {
+            std::regex realip_regex("X-Real-IP:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, realip_regex)) {
+              packet->http->true_ip = match[1].str();
+            }
+          }
+        }
+      }
     } else if (http_content.find("DELETE ") == 0) {
       packet->http->method = "DELETE";
-    } else if (http_content.find("HTTP/") == 0 &&
-               http_content.find("200 OK") == 0) {
-      if (http_content.find("200 OK") != std::string::npos) {
-        packet->http->status_code = "200";
-        packet->http->status_msg = "OK";
-      } else if (http_content.find("404 Not Found") != std::string::npos) {
-        packet->http->status_code = "404";
-        packet->http->status_msg = "Not Found";
-      } else if (http_content.find("500 Internal Server Error") !=
-                 std::string::npos) {
-        packet->http->status_code = "500";
-        packet->http->status_msg = "Internal Server Error";
+      std::regex reg("^DELETE\\s+([^\\s]+)\\s+HTTP");
+      std::string extracted_uri = Match(http_content, reg);
+      packet->http->raw_uri = extracted_uri;
+      packet->http->uri = url_decode(extracted_uri);
+
+      size_t body_start = http_content.find("\r\n\r\n");
+      if (body_start != std::string::npos) {
+        std::string headers = http_content.substr(0, body_start);
+        packet->http->raw_headers = headers;
+        std::string body = http_content.substr(body_start + 4);
+
+        if (!body.empty()) {
+          packet->http->client_body = body;
+        }
+
+        if ((headers.find("Cookie:") != std::string::npos) ||
+            (headers.find("Set-Cookie:") != std::string::npos)) {
+          std::regex cookie_regex("Cookie:\\s*([^\\r\\n]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, cookie_regex)) {
+            packet->http->raw_cookie = match[1].str();
+          } else {
+            std::regex setcookie_regex("Set-Cookie:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, setcookie_regex)) {
+              packet->http->raw_cookie = match[1].str();
+            }
+          }
+        }
+
+        if ((headers.find("X-Forwarded-For:") != std::string::npos) ||
+            (headers.find("X-Real-IP:") != std::string::npos)) {
+          std::regex xff_regex("X-Forwarded-For:\\s*([^\\r\\n,]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, xff_regex)) {
+            packet->http->true_ip = match[1].str();
+          } else {
+            std::regex realip_regex("X-Real-IP:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, realip_regex)) {
+              packet->http->true_ip = match[1].str();
+            }
+          }
+        }
       }
-    }
-    if (packet->http->method.has_value()) {
-      std::cout << "HTTP Method: " << *packet->http->method << std::endl;
-    }
-    if (packet->http->status_code.has_value()) {
-      std::cout << "HTTP Status: " << *packet->http->status_code << std::endl;
+    } else if (http_content.find("PATCH ") == 0) {
+      packet->http->method = "PATCH";
+      std::regex reg("^PATCH\\s+([^\\s]+)\\s+HTTP");
+      std::string extracted_uri = Match(http_content, reg);
+      packet->http->raw_uri = extracted_uri;
+      packet->http->uri = url_decode(extracted_uri);
+      size_t body_start = http_content.find("\r\n\r\n");
+      if (body_start != std::string::npos) {
+        std::string headers = http_content.substr(0, body_start);
+        packet->http->raw_headers = headers;
+        std::string body = http_content.substr(body_start + 4);
+
+        if (!body.empty()) {
+          packet->http->client_body = body;
+        }
+
+        if ((headers.find("Cookie:") != std::string::npos) ||
+            (headers.find("Set-Cookie:") != std::string::npos)) {
+          std::regex cookie_regex("Cookie:\\s*([^\\r\\n]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, cookie_regex)) {
+            packet->http->raw_cookie = match[1].str();
+          } else {
+            std::regex setcookie_regex("Set-Cookie:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, setcookie_regex)) {
+              packet->http->raw_cookie = match[1].str();
+            }
+          }
+        }
+
+        if ((headers.find("X-Forwarded-For:") != std::string::npos) ||
+            (headers.find("X-Real-IP:") != std::string::npos)) {
+          std::regex xff_regex("X-Forwarded-For:\\s*([^\\r\\n,]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, xff_regex)) {
+            packet->http->true_ip = match[1].str();
+          } else {
+            std::regex realip_regex("X-Real-IP:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, realip_regex)) {
+              packet->http->true_ip = match[1].str();
+            }
+          }
+        }
+      }
+    } else if (http_content.find("HTTP/") == 0) {
+      std::regex status_regex("^HTTP/1\\.1\\s+(\\d+)\\s+(.+?)\\r");
+      std::smatch match;
+      if (std::regex_search(http_content, match, status_regex)) {
+        packet->http->status_code = match[1].str();
+        packet->http->status_msg = match[2].str();
+      }
+
+      size_t body_start = http_content.find("\r\n\r\n");
+      if (body_start != std::string::npos) {
+        std::string headers = http_content.substr(0, body_start);
+        packet->http->raw_headers = headers;
+        std::string body = http_content.substr(body_start + 4);
+
+        if (!body.empty()) {
+          packet->http->raw_body = body;
+        }
+
+        if ((headers.find("Cookie:") != std::string::npos) ||
+            (headers.find("Set-Cookie:") != std::string::npos)) {
+          std::regex cookie_regex("Cookie:\\s*([^\\r\\n]+)");
+          std::smatch match;
+          if (std::regex_search(headers, match, cookie_regex)) {
+            packet->http->raw_cookie = match[1].str();
+          } else {
+            std::regex setcookie_regex("Set-Cookie:\\s*([^\\r\\n]+)");
+            if (std::regex_search(headers, match, setcookie_regex)) {
+              packet->http->raw_cookie = match[1].str();
+            }
+          }
+        }
+      }
     }
   }
 }

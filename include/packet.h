@@ -65,31 +65,22 @@ struct ICMPInfo {
 
 struct HTTPInfo {
   // Request fields
-  std::optional<std::string> method;
-  std::optional<std::string> uri;
-  std::optional<std::string> raw_uri;
-  std::optional<std::string> client_body;
+  std::optional<std::string> method;      // HTTP_METHOD
+  std::optional<std::string> uri;         // HTTP_URI
+  std::optional<std::string> raw_uri;     // HTTP_RAW_URI
+  std::optional<std::string> client_body; // HTTP_CLIENT_BODY
 
   // Response fields
-  std::optional<std::string> status_code;
-  std::optional<std::string> status_msg;
-  std::optional<std::string> raw_body;
+  std::optional<std::string> status_code; // HTTP_STAT_CODE
+  std::optional<std::string> status_msg;  // HTTP_STAT_MSG
+  std::optional<std::string> raw_body;    // HTTP_RAW_BODY
 
-  // Common headers (แยกออกมาเลย)
-  std::optional<std::string> host;
-  std::optional<std::string> user_agent;
-  std::optional<std::string> content_type;
-  std::optional<std::string> content_length;
-  std::optional<std::string> authorization;
-  std::optional<std::string> server;
-  std::optional<std::string> powered_by;
-  std::optional<std::string> cookie;
-  std::optional<std::string> referer;
-  std::optional<std::string> origin;
-  std::optional<std::string> accept_encoding;
+  // Client identification
+  std::optional<std::string> true_ip;     // HTTP_TRUE_IP
 
-  std::string raw_headers;
-  std::string raw_cookie;
+  // Raw data
+  std::string raw_headers;  // HTTP_HEADER, HTTP_RAW_HEADER
+  std::string raw_cookie;   // HTTP_COOKIE, HTTP_RAW_COOKIE
 };
 
 struct FlowInfo {

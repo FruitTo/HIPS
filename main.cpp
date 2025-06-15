@@ -97,6 +97,7 @@ void sniff(const string &iface, auto &conf) {
 }
 
 int main() {
+
   vector<string> interface = getInterfaceName();
   thread_pool pool(interface.size());
 
