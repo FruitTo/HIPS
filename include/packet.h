@@ -1,28 +1,10 @@
 #ifndef PACKET_H
 #define PACKET_H
-#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include "flow.h"
 #include <vector>
-
-enum class FlowState {
-  ESTABLISHED,     // TCP connection established
-  NOT_ESTABLISHED, // TCP handshake ยังไม่เสร็จ
-  STATELESS        // ไม่ติดตาม connection state
-};
-
-enum class FlowDirection {
-  TO_CLIENT,   // ไปยัง client
-  TO_SERVER,   // ไปยัง server
-  FROM_CLIENT, // มาจาก client
-  FROM_SERVER  // มาจาก server
-};
-
-enum class StreamMode {
-  NO_STREAM,  // ไม่ใช้ stream reassembly
-  ONLY_STREAM // ใช้เฉพาะ reassembled stream
-};
 
 struct TCPFlagsInfo {
   bool fin = false; // F - Finish
@@ -81,12 +63,6 @@ struct HTTPInfo {
   // Raw data
   std::string raw_headers;  // HTTP_HEADER, HTTP_RAW_HEADER
   std::string raw_cookie;   // HTTP_COOKIE, HTTP_RAW_COOKIE
-};
-
-struct FlowInfo {
-  std::optional<FlowState> state;
-  std::optional<FlowDirection> direction;
-  std::optional<StreamMode> stream_mode;
 };
 
 struct PacketInfo {

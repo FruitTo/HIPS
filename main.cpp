@@ -97,15 +97,13 @@ void sniff(const string &iface, auto &conf) {
 }
 
 int main() {
-
   vector<string> interface = getInterfaceName();
   thread_pool pool(interface.size());
-
   vector<future<void>> task;
+  
   for (const string &iface : interface) {
     NetworkConfig conf;
     conf.HOME_NET = getIpInterface(iface);
-    cout << *conf.HOME_NET << endl;
     conf.EXTERNAL_NET = "!" + *conf.HOME_NET;
     cout << "Choose Your services for " << iface << " interface." << endl;
     cout << "HTTP Service ? [y/n]" << endl;
