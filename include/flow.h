@@ -7,17 +7,17 @@
 #include <chrono>
 #include <unordered_map>
 
+struct PacketInfo;
+
 enum class FlowState {
-  ESTABLISHED,     // TCP connection established
-  NOT_ESTABLISHED, // TCP handshake ยังไม่เสร็จ
-  STATELESS        // ไม่ติดตาม connection state
+  ESTABLISHED,
+  NOT_ESTABLISHED,
+  STATELESS
 };
 
 enum class FlowDirection {
-  TO_CLIENT,   // ไปยัง client
-  TO_SERVER,   // ไปยัง server
-  FROM_CLIENT, // มาจาก client
-  FROM_SERVER  // มาจาก server
+  TO_CLIENT,
+  TO_SERVER,
 };
 
 enum class FragmentMode { 
@@ -26,24 +26,24 @@ enum class FragmentMode {
 };
 
 enum class StreamMode {
-  NO_STREAM,  // ไม่ใช้ stream reassembly
-  ONLY_STREAM // ใช้เฉพาะ reassembled stream
+  NO_STREAM,  
+  ONLY_STREAM
 };
 
-// สำหรับ PacketInfo (per-packet data)
 struct FlowInfo {
-  std::string flow_key;                     // 5-tuple hash
-  std::optional<FlowState> state;           // สำหรับ rule matching
-  std::optional<FlowDirection> direction;   // สำหรับ rule matching  
-  std::optional<StreamMode> stream_mode;    // สำหรับ rule matching
-  std::optional<FragmentMode> frag;         // สำหรับ rule matching
+  std::string flow_key;
+  std::optional<FlowState> state;
+  std::optional<FlowDirection> direction; 
+  std::optional<StreamMode> stream_mode;
+  std::optional<FragmentMode> frag;
 };
 
-// สำหรับ FlowTable (persistent data)
 struct FlowEntry {
   std::string flow_key;
   FlowState current_state = FlowState::NOT_ESTABLISHED;
-  FlowDirection direction = FlowDirection::TO_SERVER;
+  std::string client_ip, server_ip;
+  uint16_t client_port, server_port;
+  std::string protocol;
   
   std::chrono::system_clock::time_point created_time;
   std::chrono::system_clock::time_point last_seen;
@@ -60,6 +60,9 @@ struct FlowEntry {
   bool syn_seen = false;
   bool fin_seen = false;
   bool rst_seen = false;
+  bool shake1 = false;
+  bool shake2 = false;
+  bool shake3 = false;
 };
 
 #endif

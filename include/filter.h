@@ -69,6 +69,12 @@ void IPFilter(PacketInfo *packet, Tins::IP &ip) {
   if (ip.flags() & 0x8000) {
     packet->reserved = true;
   }
+
+  if (packet->more_fragments || packet->dont_fragment) {
+    packet->flow.frag = FragmentMode::ONLY_FRAG;
+  } else {
+    packet->flow.frag = FragmentMode::NO_FRAG;
+  }
 }
 
 void TCPFilter(PacketInfo *packet, Tins::TCP &tcp) {

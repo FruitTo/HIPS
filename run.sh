@@ -1,29 +1,29 @@
 #!/bin/bash
-# Check if a source file is provided
 if [ -z "$1" ]; then
-  echo "Usage: sudo ./run.sh <source_file.cpp>"
+  echo "Usage: ./run.sh <source_file.cpp>"
   exit 1
 fi
 
-# Set your source file and output file
 SOURCE_FILE=$1
-OUTPUT_FILE="${SOURCE_FILE%.cpp}"
+OUTPUT_FILE="${SOURCE_FILE%.cpp}_exe"
 
-# Compiler and flags
 CXX=g++
-CXX_FLAGS="-std=c++20 -Wall -Wextra -g"  # ← เปลี่ยนเป็น C++20
-LIB_FLAGS="-ltins -lpcap -lssl -ljsoncpp"
-INCLUDE_FLAGS="-I./include"               # ← เพิ่มบรรทัดนี้
+CXX_FLAGS="-std=c++20 -Wall -Wextra -g -pthread"
+LIB_FLAGS="-ltins -lpcap -lssl -ljsoncpp -lxxhash"  # ต้องมี -lxxhash
+INCLUDE_FLAGS="-I./include"
 
 echo "Compiling $SOURCE_FILE with C++20..."
+echo "Libraries: $LIB_FLAGS"  # เพิ่มเพื่อ debug
 
-# Compile the source file
-$CXX $CXX_FLAGS $INCLUDE_FLAGS "$SOURCE_FILE" -o "$OUTPUT_FILE" $LIB_FLAGS  # ← เพิ่ม $INCLUDE_FLAGS
+$CXX $CXX_FLAGS $INCLUDE_FLAGS "$SOURCE_FILE" -o "$OUTPUT_FILE" $LIB_FLAGS
 
-# Check if compilation succeeded
 if [ $? -eq 0 ]; then
   echo "Compilation successful. Running..."
-  sudo ./"$OUTPUT_FILE"
+  if [[ "$SOURCE_FILE" == "main.cpp" ]]; then
+    sudo ./"$OUTPUT_FILE"
+  else
+    ./"$OUTPUT_FILE"
+  fi
 else
   echo "Compilation failed!"
   exit 1

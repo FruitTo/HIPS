@@ -18,8 +18,9 @@ struct NetworkConfig {
    std::vector<std::string> FILE_DATA_PORTS = {"143","993","110","995"}; 
    std::optional<bool> HTTP_SERVERS;       
    std::optional<bool> SMTP_SERVERS;       
-   std::optional<bool> SQL_SERVERS;        
    std::optional<bool> TELNET_SERVERS;    
+   std::optional<bool> SIP_SERVERS;    
+   std::optional<bool> SQL_SERVERS;    
 };
 
 struct GeneralOption
