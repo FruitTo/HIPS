@@ -1,5 +1,6 @@
 #ifndef FILTER_H
 #define FILTER_H
+
 #include "packet.h"
 #include <chrono>
 #include <curl/curl.h>
@@ -10,8 +11,6 @@
 #include <string>
 #include <tins/tins.h>
 #include <vector>
-
-
 
 std::string url_encode(const std::string &str) {
   std::ostringstream encoded;
@@ -68,6 +67,7 @@ void IPFilter(PacketInfo *packet, Tins::IP &ip) {
   packet->ip_header_len = ip.header_size();
   packet->frag_offset = ip.fragment_offset();
   packet->checksum = ip.checksum();
+  packet->ip_size = ip.size();
 
   if (ip.flags() & Tins::IP::DONT_FRAGMENT) {
     packet->dont_fragment = true;

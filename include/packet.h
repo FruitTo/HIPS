@@ -122,12 +122,13 @@ struct PacketInfo {
   std::string protocol;
   std::string src_addr;
   std::string dst_addr;
-  uint8_t ip_proto;      // IP Protocol number (6=TCP, 17=UDP, 1=ICMP)
-  uint16_t ip_len;       // Total IP packet length
-  uint8_t ip_tos;        // Type of Service / DSCP
-  uint8_t ip_version;    // IP version (4 or 6)
-  uint8_t ip_header_len; // IP header length
-  uint16_t frag_offset;  // Fragment offset (13 bits)
+  uint8_t ip_proto;                // IP Protocol number (6=TCP, 17=UDP, 1=ICMP)
+  uint16_t ip_len;                 // Total IP packet length (IP Header)
+  size_t ip_size;                  // Actual size of packet
+  uint8_t ip_tos;                  // Type of Service / DSCP
+  uint8_t ip_version;              // IP version (4 or 6)
+  uint8_t ip_header_len;           // IP header length
+  uint16_t frag_offset;            // Fragment offset (13 bits)
   uint16_t checksum;
 
   std::optional<TCPInfo> tcp;

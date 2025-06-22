@@ -6,6 +6,8 @@
 #include "./include/packet.h"
 #include "./include/snort_rule.h"
 #include "./include/snort_rule_parser.h"
+#include "./include/header_detection.h"
+#include "./include/option_detection.h"
 
 #include <chrono>
 #include <filesystem>
@@ -22,6 +24,7 @@ using namespace chrono;
 
 void sniff(const string &iface, auto &conf);
 
+auto rules = SnortRuleParser::parseRulesFromFile("./rule/snort3-community.rules");
 int main() {
   vector<string> interface = getInterfaceName();
   thread_pool pool(interface.size());
@@ -135,8 +138,6 @@ void sniff(const string &iface, auto &conf) {
           } else {
             packet.flow.direction = FlowDirection::TO_SERVER;
           }
-          cout << "SRC: " << packet.src_addr << "-> DST: " << packet.dst_addr << endl; 
-          
           if (pdu->find_pdu<TCP>()) {
             TCP &tcp = pdu->rfind_pdu<TCP>();
             packet.protocol = "tcp";
@@ -214,6 +215,13 @@ void sniff(const string &iface, auto &conf) {
           flowIdentication(&packet, &conf, flow_table, bloom_counters);
           if (flow_table.size() > flows_before) {
             total_flows++;
+          }
+
+          if(headerDetection(packet, rules, conf)){
+            cout << "SRC:" << packet.src_addr << '\t';
+            if(optionDetection(packet, rules, conf)){
+              cout << "MATCH" << endl;
+            }
           }
         }
         return true;
