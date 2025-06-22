@@ -1,9 +1,10 @@
 #ifndef PACKET_H
 #define PACKET_H
+#include "dto.h"
+#include "flow.h"
 #include <cstdint>
 #include <optional>
 #include <string>
-#include "flow.h"
 #include <vector>
 
 struct TCPFlagsInfo {
@@ -58,11 +59,57 @@ struct HTTPInfo {
   std::optional<std::string> raw_body;    // HTTP_RAW_BODY
 
   // Client identification
-  std::optional<std::string> true_ip;     // HTTP_TRUE_IP
+  std::optional<std::string> true_ip; // HTTP_TRUE_IP
 
   // Raw data
-  std::string raw_headers;  // HTTP_HEADER, HTTP_RAW_HEADER
-  std::string raw_cookie;   // HTTP_COOKIE, HTTP_RAW_COOKIE
+  std::string raw_headers; // HTTP_HEADER, HTTP_RAW_HEADER
+  std::string raw_cookie;  // HTTP_COOKIE, HTTP_RAW_COOKIE
+};
+
+// เพิ่ม struct ใหม่
+struct SSLInfo {
+  std::optional<SSLState> state;
+  std::optional<SSLVersion> version;
+  std::vector<uint8_t> payload;
+  size_t payload_size = 0;
+};
+
+struct SIPInfo {
+  std::string headers;
+  std::string body;
+  std::vector<uint8_t> payload;
+  size_t payload_size = 0;
+};
+
+struct DCEInfo {
+  std::string interface_uuid;
+  uint16_t operation_num = 0;
+  std::vector<uint8_t> stub_data;
+  std::vector<uint8_t> payload;
+  size_t payload_size = 0;
+};
+
+struct FTPInfo {
+  std::optional<std::string> command;
+  std::optional<std::string> args;
+  std::optional<std::string> response_code;
+  std::optional<std::string> response_msg;
+  std::optional<std::string> filename;
+  std::vector<uint8_t> payload;
+  size_t payload_size = 0;
+};
+
+struct SMTPInfo {
+  std::optional<std::string> command;
+  std::optional<std::string> args;
+  std::optional<std::string> response_code;
+  std::optional<std::string> response_msg;
+  std::optional<std::string> from;
+  std::optional<std::string> to;
+  std::optional<std::string> subject;
+  std::string body;
+  std::vector<uint8_t> payload;
+  size_t payload_size = 0;
 };
 
 struct PacketInfo {
@@ -75,11 +122,23 @@ struct PacketInfo {
   std::string protocol;
   std::string src_addr;
   std::string dst_addr;
+  uint8_t ip_proto;      // IP Protocol number (6=TCP, 17=UDP, 1=ICMP)
+  uint16_t ip_len;       // Total IP packet length
+  uint8_t ip_tos;        // Type of Service / DSCP
+  uint8_t ip_version;    // IP version (4 or 6)
+  uint8_t ip_header_len; // IP header length
+  uint16_t frag_offset;  // Fragment offset (13 bits)
+  uint16_t checksum;
 
   std::optional<TCPInfo> tcp;
   std::optional<UDPInfo> udp;
   std::optional<ICMPInfo> icmp;
   std::optional<HTTPInfo> http;
+  std::optional<SSLInfo> ssl;
+  std::optional<SIPInfo> sip;
+  std::optional<DCEInfo> dce;
+  std::optional<FTPInfo> ftp;
+  std::optional<SMTPInfo> smtp;
 
   FlowInfo flow;
 };
