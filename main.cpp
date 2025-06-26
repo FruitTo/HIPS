@@ -22,15 +22,20 @@ using namespace Tins;
 using namespace BS;
 using namespace chrono;
 
+// Pre Declaratrion.
 void sniff(const string &iface, auto &conf);
 
+// Global Object MAP -> VECTOR -> Rule-Object
 auto rules = SnortRuleParser::parseRulesFromFile("./rule/snort3-community.rules");
+
 int main() {
-  vector<string> interface = getInterfaceName();
-  thread_pool pool(interface.size());
+  vector<string> interfaceName = getInterfaceName();
+  thread_pool pool(interfaceName.size());
   vector<future<void>> task;
 
-  for (const string &iface : interface) {
+  // Runing separate interface.
+  for (const string &iface : interfaceName) {
+    // Config of the current interface.
     NetworkConfig conf;
     conf.HOME_NET = getIpInterface(iface);
     conf.EXTERNAL_NET = "!" + *conf.HOME_NET;
@@ -77,6 +82,7 @@ int main() {
     } else {
       conf.SIP_SERVERS = false;
     }
+
     task.push_back(pool.submit_task([iface, conf]() { sniff(iface, conf); }));
   }
   
@@ -218,10 +224,7 @@ void sniff(const string &iface, auto &conf) {
           }
 
           if(headerDetection(packet, rules, conf)){
-            cout << "SRC:" << packet.src_addr << '\t';
-            if(optionDetection(packet, rules, conf)){
-              cout << "MATCH" << endl;
-            }
+            cout << "SRC:" << packet.src_addr << '\t' << endl;
           }
         }
         return true;
