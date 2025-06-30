@@ -1,6 +1,7 @@
 #ifndef FLOW_MANAGER_H
 #define FLOW_MANAGER_H
 
+#include "xxhash.h"
 #include "flow.h"
 #include "packet.h"
 #include "snort_rule.h"
@@ -10,7 +11,6 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
-#include <xxhash.h>
 
 const size_t ARRAY_SIZE = 262144;
 

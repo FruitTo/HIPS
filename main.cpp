@@ -8,13 +8,13 @@
 #include "./include/snort_rule_parser.h"
 #include "./include/header_detection.h"
 #include "./include/option_detection.h"
+#include "./include/tins/tins.h"
 
 #include <chrono>
 #include <filesystem>
 #include <future>
 #include <iostream>
 #include <string>
-#include <tins/tins.h>
 #include <vector>
 
 using namespace std;

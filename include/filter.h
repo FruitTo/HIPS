@@ -3,7 +3,6 @@
 
 #include "packet.h"
 #include <chrono>
-#include <curl/curl.h>
 #include <filesystem>
 #include <iostream>
 #include <regex>
