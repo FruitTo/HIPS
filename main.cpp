@@ -7,7 +7,6 @@
 #include "./include/snort_rule.h"
 #include "./include/snort_rule_parser.h"
 #include "./include/header_detection.h"
-#include "./include/option_detection.h"
 #include "./include/tins/tins.h"
 
 #include <chrono>
@@ -223,6 +222,7 @@ void sniff(const string &iface, auto &conf) {
             total_flows++;
           }
 
+          // Detection
           if(headerDetection(packet, rules, conf)){
             cout << "SRC:" << packet.src_addr << '\t' << endl;
           }

@@ -1,11 +1,12 @@
 #ifndef INTERFACE_H
 #define INTERFACE_H
 
+#include "./tins/tins.h"
+
+#include <vector>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <tins/tins.h>
-#include <vector>
 #include <algorithm>
 
 std::vector<std::string> getInterfaceName() {

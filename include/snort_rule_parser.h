@@ -467,12 +467,6 @@ private:
       current_buffer = Buffer::SIP_HEADER;
     } else if (option_name == "sip_body") {
       current_buffer = Buffer::SIP_BODY;
-    } else if (option_name == "threshold") {
-      parseThresholdOption(option_value, rule_option.general);
-    } else if (option_name == "detection_filter") {
-      parseDetectionFilterOption(option_value, rule_option.general);
-    } else if (option_name == "priority") {
-      rule_option.general.priority = std::stoi(option_value);
     }
 
     // Parse content options with modifiers
