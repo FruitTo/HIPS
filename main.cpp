@@ -10,12 +10,17 @@
 #include "./include/tins/tins.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <cstdio>
 #include <filesystem>
 #include <future>
 #include <iostream>
 #include <string>
 #include <vector>
-#include <cstdlib>
+#include <unistd.h>     
+#include <sys/types.h>
+#include <sys/wait.h>
+
 
 using namespace std;
 using namespace Tins;
@@ -33,61 +38,79 @@ int main() {
   // system("sudo ./snort.sh -i enp2s0 -A alert_fast");
 
   vector<string> interfaceName = getInterfaceName();
-  thread_pool pool(interfaceName.size());
+  thread_pool pool(interfaceName.size() + 1);
   vector<future<void>> task;
+  vector<pair<string, NetworkConfig>> configuredInterfaces;
+
 
   // Runing separate interface.
   for (const string &iface : interfaceName) {
-    // Config of the current interface.
     NetworkConfig conf;
     conf.HOME_NET = getIpInterface(iface);
     conf.EXTERNAL_NET = "!" + *conf.HOME_NET;
 
     cout << "Choose Your services for " << iface << " interface." << endl;
-    cout << "HTTP Service ? [y/n]" << endl;
     char yesno;
+
+    cout << "HTTP Service ? [y/n]" << endl;
     cin >> yesno;
-    if (yesno == 'y' || yesno == 'Y') {
-      conf.HTTP_SERVERS = true;
-      yesno = '\0';
-    } else {
-      conf.HTTP_SERVERS = false;
-    }
+    conf.HTTP_SERVERS = (yesno == 'y' || yesno == 'Y');
+
     cout << "SMTP Service ? [y/n]" << endl;
     cin >> yesno;
-    if (yesno == 'y' || yesno == 'Y') {
-      conf.SMTP_SERVERS = true;
-      yesno = '\0';
-    } else {
-      conf.SMTP_SERVERS = false;
-    }
+    conf.SMTP_SERVERS = (yesno == 'y' || yesno == 'Y');
+
     cout << "SQL Service ? [y/n]" << endl;
     cin >> yesno;
-    if (yesno == 'y' || yesno == 'Y') {
-      conf.SQL_SERVERS = true;
-      yesno = '\0';
-    } else {
-      conf.SQL_SERVERS = false;
-    }
+    conf.SQL_SERVERS = (yesno == 'y' || yesno == 'Y');
+
     cout << "TELNET Service ? [y/n]" << endl;
     cin >> yesno;
-    if (yesno == 'y' || yesno == 'Y') {
-      conf.TELNET_SERVERS = true;
-      yesno = '\0';
-    } else {
-      conf.TELNET_SERVERS = false;
-    }
+    conf.TELNET_SERVERS = (yesno == 'y' || yesno == 'Y');
+
     cout << "SIP Service ? [y/n]" << endl;
     cin >> yesno;
-    if (yesno == 'y' || yesno == 'Y') {
-      conf.SIP_SERVERS = true;
-      yesno = '\0';
-    } else {
-      conf.SIP_SERVERS = false;
+    conf.SIP_SERVERS = (yesno == 'y' || yesno == 'Y');
+
+    configuredInterfaces.push_back({iface, conf});
+  }
+
+  // Push task
+  for (auto &[iface, conf] : configuredInterfaces) {
+    task.push_back(pool.submit_task([iface, conf]() {
+        sniff(iface, conf);
+    }));
+  }
+
+  // Subprocess Engine.
+  task.push_back(pool.submit_task([&]() {
+    // 1. สร้าง pipe
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        perror("pipe failed");
+        return;
     }
 
-    task.push_back(pool.submit_task([iface, conf]() { sniff(iface, conf); }));
-  }
+    // 2. fork process (if value > 0 = process ID; if value == 0 = process is startign.)
+    pid_t pid = fork();
+    if (pid == 0) {
+        dup2(pipe_fd[0], STDIN_FILENO);  // เชื่อม read-end กับ stdin
+        close(pipe_fd[1]);               // ปิด write-end ฝั่ง child
+        char *args[] = {
+          (char *)"./snort.sh",
+          // (char *)"-r", (char *)"-",
+          (char *)"-A", (char *)"alert_fast",
+          NULL
+        };
+        execvp("./snort.sh", args);
+
+        perror("exec failed");
+        _exit(1);
+    }
+
+    // 3. Parent: write packet ลง pipe_fd[1]
+    close(pipe_fd[0]);  // ปิด read-end ฝั่ง parent
+  }));
   
   for (auto &t : task) {
     t.wait();
