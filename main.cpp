@@ -15,6 +15,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 using namespace std;
 using namespace Tins;
@@ -25,9 +26,12 @@ using namespace chrono;
 void sniff(const string &iface, auto &conf);
 
 // Global Object MAP -> VECTOR -> Rule-Object
-auto rules = SnortRuleParser::parseRulesFromFile("./rule/snort3-community.rules");
+auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
 
 int main() {
+
+  // system("sudo ./snort.sh -i enp2s0 -A alert_fast");
+
   vector<string> interfaceName = getInterfaceName();
   thread_pool pool(interfaceName.size());
   vector<future<void>> task;

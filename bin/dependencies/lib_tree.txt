@@ -1,0 +1,80 @@
+./lib
+├── daq
+│   ├── daq_afpacket.la
+│   ├── daq_afpacket.so
+│   ├── daq_bpf.la
+│   ├── daq_bpf.so
+│   ├── daq_dump.la
+│   ├── daq_dump.so
+│   ├── daq_fst.la
+│   ├── daq_fst.so
+│   ├── daq_gwlb.la
+│   ├── daq_gwlb.so
+│   ├── daq_pcap.la
+│   ├── daq_pcap.so
+│   ├── daq_savefile.la
+│   ├── daq_savefile.so
+│   ├── daq_trace.la
+│   └── daq_trace.so
+├── engines-3
+│   ├── afalg.so
+│   ├── capi.so
+│   ├── loader_attic.so
+│   └── padlock.so
+├── libcrypto.a
+├── libcrypto.so -> libcrypto.so.3
+├── libcrypto.so.3
+├── libdaq.a
+├── libdaq.la
+├── libdaq.so -> libdaq.so.3.0.0
+├── libdaq.so.3 -> libdaq.so.3.0.0
+├── libdaq.so.3.0.0
+├── libdaq_static_afpacket.a
+├── libdaq_static_afpacket.la
+├── libdaq_static_bpf.a
+├── libdaq_static_bpf.la
+├── libdaq_static_dump.a
+├── libdaq_static_dump.la
+├── libdaq_static_fst.a
+├── libdaq_static_fst.la
+├── libdaq_static_gwlb.a
+├── libdaq_static_gwlb.la
+├── libdaq_static_pcap.a
+├── libdaq_static_pcap.la
+├── libdaq_static_savefile.a
+├── libdaq_static_savefile.la
+├── libdaq_static_trace.a
+├── libdaq_static_trace.la
+├── libfl.a
+├── libfl.la
+├── libfl.so -> libfl.so.2.0.0
+├── libfl.so.2 -> libfl.so.2.0.0
+├── libfl.so.2.0.0
+├── libssl.a
+├── libssl.so -> libssl.so.3
+├── libssl.so.3
+├── ossl-modules
+│   └── legacy.so
+└── pkgconfig
+    ├── hwloc.pc
+    ├── libcrypto.pc
+    ├── libdaq.pc
+    ├── libdaq_static_afpacket.pc
+    ├── libdaq_static_bpf.pc
+    ├── libdaq_static_dump.pc
+    ├── libdaq_static_fst.pc
+    ├── libdaq_static_gwlb.pc
+    ├── libdaq_static_pcap.pc
+    ├── libdaq_static_savefile.pc
+    ├── libdaq_static_trace.pc
+    ├── libfl.pc
+    ├── libpcre2-16.pc
+    ├── libpcre2-32.pc
+    ├── libpcre2-8.pc
+    ├── libpcre2-posix.pc
+    ├── libssl.pc
+    ├── luajit.pc
+    ├── openssl.pc
+    └── zlib.pc
+
+5 directories, 73 files

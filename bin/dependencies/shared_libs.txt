@@ -1,0 +1,17 @@
+./lib/engines-3/loader_attic.so
+./lib/engines-3/afalg.so
+./lib/engines-3/capi.so
+./lib/engines-3/padlock.so
+./lib/ossl-modules/legacy.so
+./lib/libcrypto.so.3
+./lib/daq/daq_gwlb.so
+./lib/daq/daq_trace.so
+./lib/daq/daq_fst.so
+./lib/daq/daq_dump.so
+./lib/daq/daq_savefile.so
+./lib/daq/daq_pcap.so
+./lib/daq/daq_bpf.so
+./lib/daq/daq_afpacket.so
+./lib/libssl.so.3
+./lib/libfl.so.2.0.0
+./lib/libdaq.so.3.0.0
