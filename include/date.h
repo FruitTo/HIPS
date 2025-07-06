@@ -51,7 +51,8 @@ std::string currentDate()
     return date;
 }
 
-std::string getPath(){
+std::string getPath()
+{
     time_t rawtime;
     struct tm *timeinfo;
     time(&rawtime);
@@ -66,6 +67,20 @@ std::string getPath(){
     ss_month << std::setfill('0') << std::setw(2) << month;
 
     return "./logs/" + std::to_string(year) + "/" + ss_month.str() + "/" + ss_day.str() + "/";
+}
+
+std::string timeStamp() {
+    time_t rawtime;
+    struct tm* timeinfo;
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+
+    std::stringstream ss;
+    ss << std::setfill('0') << std::setw(2) << timeinfo->tm_hour << "-"
+       << std::setfill('0') << std::setw(2) << timeinfo->tm_min << "-"
+       << std::setfill('0') << std::setw(2) << timeinfo->tm_sec;
+
+    return ss.str();
 }
 
 #endif

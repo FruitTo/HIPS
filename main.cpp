@@ -30,27 +30,26 @@ using namespace chrono;
 // Pre Declaratrion.
 void sniff(const string &iface, auto &conf);
 
-// Global Object MAP -> VECTOR -> Rule-Object
+// Global Object MAP("protocol",vector) -> VECTOR -> Rule-Object
 auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
 
 int main() {
-
-  // system("sudo ./snort.sh -i enp2s0 -A alert_fast");
-
   vector<string> interfaceName = getInterfaceName();
   thread_pool pool(interfaceName.size() + 1);
   vector<future<void>> task;
   vector<pair<string, NetworkConfig>> configuredInterfaces;
 
 
-  // Runing separate interface.
+  // Config Interface
   for (const string &iface : interfaceName) {
     NetworkConfig conf;
+    char yesno;
+
+    conf.NAME = iface;
     conf.HOME_NET = getIpInterface(iface);
     conf.EXTERNAL_NET = "!" + *conf.HOME_NET;
 
     cout << "Choose Your services for " << iface << " interface." << endl;
-    char yesno;
 
     cout << "HTTP Service ? [y/n]" << endl;
     cin >> yesno;
@@ -75,27 +74,27 @@ int main() {
     configuredInterfaces.push_back({iface, conf});
   }
 
-  // Push task
+  // Push Packet Capture Task
   for (auto &[iface, conf] : configuredInterfaces) {
     task.push_back(pool.submit_task([iface, conf]() {
         sniff(iface, conf);
     }));
   }
 
-  // Subprocess Engine.
+  // Push Create Subprocess Engine Task (Test Demo)
   task.push_back(pool.submit_task([&]() {
-    // 1. สร้าง pipe
+    // Create pipe
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
         perror("pipe failed");
         return;
     }
 
-    // 2. fork process (if value > 0 = process ID; if value == 0 = process is startign.)
+    // Fork process (if value > 0 = process ID; if value == 0 = process is startign.)
     pid_t pid = fork();
     if (pid == 0) {
-        dup2(pipe_fd[0], STDIN_FILENO);  // เชื่อม read-end กับ stdin
-        close(pipe_fd[1]);               // ปิด write-end ฝั่ง child
+        dup2(pipe_fd[0], STDIN_FILENO);
+        close(pipe_fd[1]);
         char *args[] = {
           (char *)"./snort.sh",
           // (char *)"-r", (char *)"-",
@@ -108,8 +107,7 @@ int main() {
         _exit(1);
     }
 
-    // 3. Parent: write packet ลง pipe_fd[1]
-    close(pipe_fd[0]);  // ปิด read-end ฝั่ง parent
+    close(pipe_fd[0]);
   }));
   
   for (auto &t : task) {
@@ -120,20 +118,22 @@ int main() {
 }
 
 void sniff(const string &iface, auto &conf) {
+  // Initial Flow Variable
   unordered_map<string, FlowEntry> flow_table;
   uint16_t bloom_counters[ARRAY_SIZE] = {0};
   uint64_t total_packets = 0;
   uint64_t total_flows = 0;
   auto last_cleanup = chrono::system_clock::now();
   
-  // Log
+  // Initial Log Variable
   string currentDay = currentDate();
+  string currentTime = timeStamp();
   string currentPath = getPath();
   filesystem::create_directories(currentPath);
-  auto writer = make_unique<PacketWriter>(currentPath + iface + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
+  auto writer = make_unique<PacketWriter>(currentPath + iface + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
 
-  // Config
-  SnifferConfiguration config;
+  // Capture Packet (Sniffer)
+  SnifferConfiguration config; 
   config.set_promisc_mode(true);
   Sniffer sniffer(iface, config);
   sniffer.sniff_loop([&](Packet &pkt) {

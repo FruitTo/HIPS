@@ -1,11 +1,6 @@
 #!/bin/bash
 
-if [ -z "$1" ]; then
-  echo "Usage: ./run.sh <source_file.cpp>"
-  exit 1
-fi
-
-SOURCE_FILE="$1"
+SOURCE_FILE="main.cpp"
 OUTPUT_FILE="${SOURCE_FILE%.cpp}_exe"
 
 CXX=g++

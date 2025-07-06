@@ -71,6 +71,12 @@
         "typeinfo": "cpp",
         "variant": "cpp",
         "queue": "cpp",
-        "stack": "cpp"
+        "stack": "cpp",
+        "complex": "cpp",
+        "csignal": "cpp",
+        "forward_list": "cpp",
+        "list": "cpp",
+        "unordered_set": "cpp",
+        "shared_mutex": "cpp"
     }
 }

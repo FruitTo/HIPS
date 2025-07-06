@@ -200,9 +200,7 @@ inline void createNewFlow(PacketInfo *packet, const std::string &flow_key,
   flow_table[flow_key] = new_flow;
 }
 
-inline void flowIdentication(PacketInfo *packet, const NetworkConfig *conf,
-                 std::unordered_map<std::string, FlowEntry> &flow_table,
-                 uint16_t bloom_counters[]) {
+inline void flowIdentication(PacketInfo *packet, const NetworkConfig *conf, std::unordered_map<std::string, FlowEntry> &flow_table, uint16_t bloom_counters[]) {
   std::string flow_key = createFlowKey(packet);
   if (flow_key.empty())
     return;

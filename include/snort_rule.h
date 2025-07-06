@@ -9,6 +9,7 @@
 #include "./none_payload.h"
 
 struct NetworkConfig {
+   std::string NAME;
    std::optional<std::string> HOME_NET;           
    std::optional<std::string> EXTERNAL_NET;
    std::vector<std::string> HTTP_PORTS = {"80","443","8080","8443"};
