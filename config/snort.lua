@@ -1,40 +1,30 @@
--- Snort++ (Snort 3) Basic Configuration
--- Base: /home/fruitto/Project/engine
+include 'snort_defaults.lua'
 
-RULE_PATH = '/home/fruitto/Project/engine/rules'
-LOG_PATH  = '/home/fruitto/Project/engine/snort_logs'
-INTERFACE = 'enp2s0'
+-- Snort++ auto-generated configuration
 
-ipvar = {
-    HOME_NET     = 'any',
-    EXTERNAL_NET = 'any',
+variables = {
+  HOME_NET = {'192.168.1.121', '127.0.0.1'},
+  EXTERNAL_NET = {'!192.168.1.121', '!127.0.0.1'}
 }
 
-decoder = {}
-stream = {}
-stream_ip = {}
-stream_tcp = {}
-stream_udp = {}
-stream_icmp = {}
+daq_module = 'af_packet'
+daq_mode = 'inline'
 
-detection = {}
-
--- ✅ Logging via alert_fast
-loggers = {
-    {
-        name = 'alert_fast',
-        file = true,
-        filename = LOG_PATH .. '/snort.alert'
-    }
-}
-
--- Optional: packet logger
-pkt_logger = {
-    file = true,
-    limit = 1000
-}
-
--- ✅ Rules
 ips = {
-    rules = RULE_PATH .. '/snort3-community.rules'
+  rules = '/home/fruitto/Project/HIPS/rules/snort3-community.rules',
+  mode = 'inline',
+  enable_builtin_rules = true
+}
+
+loggers = {
+  {
+    name = 'alert_json',
+    file = true,
+    filename = '/home/fruitto/Project/HIPS/snort_logs/snort.alert'
+  }
+}
+
+pkt_logger = {
+  file = true,
+  limit = 1000
 }

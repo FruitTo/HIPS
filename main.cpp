@@ -17,31 +17,36 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <unistd.h>     
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-
 
 using namespace std;
 using namespace Tins;
 using namespace BS;
 using namespace chrono;
+namespace fs = std::filesystem;
 
-// Pre Declaratrion.
 void sniff(const string &iface, auto &conf);
 
-// Global Object MAP("protocol",vector) -> VECTOR -> Rule-Object
 auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
 
-int main() {
+int main()
+{
   vector<string> interfaceName = getInterfaceName();
+  vector<pair<string, NetworkConfig>> configuredInterfaces;
   thread_pool pool(interfaceName.size() + 1);
   vector<future<void>> task;
-  vector<pair<string, NetworkConfig>> configuredInterfaces;
 
+  bool mode;
+  char modeInput;
+  cout << "IPS Mode ? [y/n]" << endl;
+  cin >> modeInput;
+  mode = (modeInput == 'y' || modeInput == 'Y');
 
   // Config Interface
-  for (const string &iface : interfaceName) {
+  for (const string &iface : interfaceName)
+  {
     NetworkConfig conf;
     char yesno;
 
@@ -74,15 +79,89 @@ int main() {
     configuredInterfaces.push_back({iface, conf});
   }
 
+  // Create Config File
+  std::string projectRoot = fs::current_path().string();
+  std::string configPath = (fs::path(projectRoot) / "config" / "snort.lua").string();
+  std::string rulePath = (fs::path(projectRoot) / "rules").string();
+  std::string logPath = (fs::path(projectRoot) / "snort_logs").string();
+
+  std::ofstream config(configPath);
+  if (!config.is_open())
+  {
+    std::cerr << "Failed to open snort.lua for writing\n";
+    return 1;
+  }
+
+  config << "include 'snort_defaults.lua'\n\n";
+  config << "-- Snort++ auto-generated configuration\n\n";
+
+  // Build HOME_NET and EXTERNAL_NET
+  std::string homeNetLua, externalNetLua;
+  if (interfaceName.size() > 1)
+  {
+    homeNetLua = "{";
+    externalNetLua = "{";
+    for (size_t i = 0; i < interfaceName.size(); ++i)
+    {
+      std::string ip = getIpInterface(interfaceName[i]);
+      homeNetLua += "'" + ip + "'";
+      externalNetLua += "'!" + ip + "'";
+      if (i != interfaceName.size() - 1)
+      {
+        homeNetLua += ", ";
+        externalNetLua += ", ";
+      }
+    }
+    homeNetLua += "}";
+    externalNetLua += "}";
+  }
+  else
+  {
+    std::string ip = getIpInterface(interfaceName[0]);
+    homeNetLua = "'" + ip + "'";
+    externalNetLua = "'!" + ip + "'";
+  }
+
+  // ✅ Use `variables` instead of `default_variables`
+  config << "variables = {\n";
+  config << "  HOME_NET = " << homeNetLua << ",\n";
+  config << "  EXTERNAL_NET = " << externalNetLua << "\n";
+  config << "}\n\n";
+
+  config << "daq_module = 'af_packet'\n";
+  config << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n\n";
+
+  config << "ips = {\n";
+  config << "  rules = '" << rulePath << "/snort3-community.rules',\n";
+  config << "  mode = 'inline',\n";
+  config << "  enable_builtin_rules = true\n"; // ✅ Removed the `variables` field from here
+  config << "}\n\n";
+
+  config << "loggers = {\n";
+  config << "  {\n";
+  config << "    name = 'alert_json',\n";
+  config << "    file = true,\n";
+  config << "    filename = '" << logPath << "/snort.alert'\n";
+  config << "  }\n";
+  config << "}\n\n";
+
+  config << "pkt_logger = {\n";
+  config << "  file = true,\n";
+  config << "  limit = 1000\n";
+  config << "}\n";
+
+  config.close();
+
   // Push Packet Capture Task
-  for (auto &[iface, conf] : configuredInterfaces) {
-    task.push_back(pool.submit_task([iface, conf]() {
-        sniff(iface, conf);
-    }));
+  for (auto &[iface, conf] : configuredInterfaces)
+  {
+    task.push_back(pool.submit_task([iface, conf]()
+                                    { sniff(iface, conf); }));
   }
 
   // Push Create Subprocess Engine Task (Test Demo)
-  task.push_back(pool.submit_task([&]() {
+  task.push_back(pool.submit_task([&]()
+                                  {
     // Create pipe
     int pipe_fd[2];
     if (pipe(pipe_fd) == -1) {
@@ -90,7 +169,7 @@ int main() {
         return;
     }
 
-    // Fork process (if value > 0 = process ID; if value == 0 = process is startign.)
+    // Fork process (if value > 0 : process ID; if value == 0 : process is startign)
     pid_t pid = fork();
     if (pid == 0) {
         dup2(pipe_fd[0], STDIN_FILENO);
@@ -107,24 +186,25 @@ int main() {
         _exit(1);
     }
 
-    close(pipe_fd[0]);
-  }));
-  
-  for (auto &t : task) {
+    close(pipe_fd[0]); }));
+
+  for (auto &t : task)
+  {
     t.wait();
   }
-  
+
   return 0;
 }
 
-void sniff(const string &iface, auto &conf) {
+void sniff(const string &iface, auto &conf)
+{
   // Initial Flow Variable
   unordered_map<string, FlowEntry> flow_table;
   uint16_t bloom_counters[ARRAY_SIZE] = {0};
   uint64_t total_packets = 0;
   uint64_t total_flows = 0;
   auto last_cleanup = chrono::system_clock::now();
-  
+
   // Initial Log Variable
   string currentDay = currentDate();
   string currentTime = timeStamp();
@@ -133,10 +213,11 @@ void sniff(const string &iface, auto &conf) {
   auto writer = make_unique<PacketWriter>(currentPath + iface + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
 
   // Capture Packet (Sniffer)
-  SnifferConfiguration config; 
+  SnifferConfiguration config;
   config.set_promisc_mode(true);
   Sniffer sniffer(iface, config);
-  sniffer.sniff_loop([&](Packet &pkt) {
+  sniffer.sniff_loop([&](Packet &pkt)
+                     {
         total_packets++;
         
         // Check Flow Time Expire
@@ -145,7 +226,7 @@ void sniff(const string &iface, auto &conf) {
           cleanupExpiredFlows(flow_table);
           last_cleanup = now;
         }
-        
+
         // Write logs
         string date = currentDate();
         string path = getPath();
@@ -156,7 +237,7 @@ void sniff(const string &iface, auto &conf) {
           writer = make_unique<PacketWriter>(currentPath + iface + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
         }
         writer->write(pkt);
-
+        
         // Filter
         PDU *pdu = pkt.pdu();
         if (pdu->find_pdu<IP>()) {
@@ -185,7 +266,7 @@ void sniff(const string &iface, auto &conf) {
             // HTTP Detection
             if (tcp.sport() == 80 || tcp.dport() == 80 || 
                 tcp.sport() == 8080 || tcp.dport() == 8080 ||
-                tcp.sport() == 443 || tcp.dport() == 443) {
+                tcp.sport() == 443 || tcp.dport() == 443)  {
               packet.protocol = "http";
               packet.http.emplace();
               HTTPFilter(&packet, tcp);
@@ -251,9 +332,8 @@ void sniff(const string &iface, auto &conf) {
 
           // Detection
           if(headerDetection(packet, rules, conf)){
-            cout << "SRC:" << packet.src_addr << '\t' << endl;
+            cout << "SRC : " << packet.src_addr << " -> DST : " << packet.dst_addr << endl;
           }
         }
-        return true;
-      });
+        return true; });
 }
