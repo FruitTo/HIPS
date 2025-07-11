@@ -25,9 +25,13 @@ using namespace std;
 using namespace Tins;
 using namespace BS;
 using namespace chrono;
-namespace fs = std::filesystem;
+namespace fs = filesystem;
 
+
+void parsePorts(const string &input, vector<string> &target);
+void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>>& configuredInterfaces);
 void sniff(const string &iface, auto &conf);
+string join(const vector<string>& list, const string& sep);
 
 auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
 
@@ -49,108 +53,58 @@ int main()
   {
     NetworkConfig conf;
     char yesno;
+    string input;
 
     conf.NAME = iface;
     conf.HOME_NET = getIpInterface(iface);
     conf.EXTERNAL_NET = "!" + *conf.HOME_NET;
 
-    cout << "Choose Your services for " << iface << " interface." << endl;
+    cout << "\nConfiguring services for interface: " << iface << "\n";
 
-    cout << "HTTP Service ? [y/n]" << endl;
-    cin >> yesno;
-    conf.HTTP_SERVERS = (yesno == 'y' || yesno == 'Y');
+    auto askService = [&](const string &name, optional<bool> &flag, vector<string> &ports)
+    {
+      cout << name << " Service? [y/n]: ";
+      cin >> yesno;
+      cin.ignore(numeric_limits<streamsize>::max(), '\n');
+      bool enabled = (yesno == 'y' || yesno == 'Y');
+      flag = enabled;
+      if (enabled)
+      {
+        cout << "Enter " << name << " port(s) (space separated): ";
+        getline(cin, input);
+        parsePorts(input, ports);
+      }
+    };
 
-    cout << "SMTP Service ? [y/n]" << endl;
+    askService("HTTP", conf.HTTP_SERVERS, conf.HTTP_PORTS);
+    askService("SSH", conf.SSH_SERVERS, conf.SSH_PORTS);
+    askService("FTP", conf.FTP_SERVERS, conf.FTP_PORTS);
+    askService("Oracle", conf.SQL_SERVERS, conf.ORACLE_PORTS);
+    askService("FileData", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
+
+    // SMTP
+    cout << "SMTP Service? [y/n]: ";
     cin >> yesno;
+    cin.ignore();
     conf.SMTP_SERVERS = (yesno == 'y' || yesno == 'Y');
 
-    cout << "SQL Service ? [y/n]" << endl;
+    // TELNET
+    cout << "TELNET Service? [y/n]: ";
     cin >> yesno;
-    conf.SQL_SERVERS = (yesno == 'y' || yesno == 'Y');
-
-    cout << "TELNET Service ? [y/n]" << endl;
-    cin >> yesno;
+    cin.ignore();
     conf.TELNET_SERVERS = (yesno == 'y' || yesno == 'Y');
 
-    cout << "SIP Service ? [y/n]" << endl;
+    // SIP
+    cout << "SIP Service? [y/n]: ";
     cin >> yesno;
+    cin.ignore();
     conf.SIP_SERVERS = (yesno == 'y' || yesno == 'Y');
 
-    configuredInterfaces.push_back({iface, conf});
+    configuredInterfaces.emplace_back(iface, conf);
   }
 
   // Create Config File
-  std::string projectRoot = fs::current_path().string();
-  std::string configPath = (fs::path(projectRoot) / "config" / "snort.lua").string();
-  std::string rulePath = (fs::path(projectRoot) / "rules").string();
-  std::string logPath = (fs::path(projectRoot) / "snort_logs").string();
-
-  std::ofstream config(configPath);
-  if (!config.is_open())
-  {
-    std::cerr << "Failed to open snort.lua for writing\n";
-    return 1;
-  }
-
-  config << "include 'snort_defaults.lua'\n\n";
-  config << "-- Snort++ auto-generated configuration\n\n";
-
-  // Build HOME_NET and EXTERNAL_NET
-  std::string homeNetLua, externalNetLua;
-  if (interfaceName.size() > 1)
-  {
-    homeNetLua = "{";
-    externalNetLua = "{";
-    for (size_t i = 0; i < interfaceName.size(); ++i)
-    {
-      std::string ip = getIpInterface(interfaceName[i]);
-      homeNetLua += "'" + ip + "'";
-      externalNetLua += "'!" + ip + "'";
-      if (i != interfaceName.size() - 1)
-      {
-        homeNetLua += ", ";
-        externalNetLua += ", ";
-      }
-    }
-    homeNetLua += "}";
-    externalNetLua += "}";
-  }
-  else
-  {
-    std::string ip = getIpInterface(interfaceName[0]);
-    homeNetLua = "'" + ip + "'";
-    externalNetLua = "'!" + ip + "'";
-  }
-
-  // ✅ Use `variables` instead of `default_variables`
-  config << "variables = {\n";
-  config << "  HOME_NET = " << homeNetLua << ",\n";
-  config << "  EXTERNAL_NET = " << externalNetLua << "\n";
-  config << "}\n\n";
-
-  config << "daq_module = 'af_packet'\n";
-  config << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n\n";
-
-  config << "ips = {\n";
-  config << "  rules = '" << rulePath << "/snort3-community.rules',\n";
-  config << "  mode = 'inline',\n";
-  config << "  enable_builtin_rules = true\n"; // ✅ Removed the `variables` field from here
-  config << "}\n\n";
-
-  config << "loggers = {\n";
-  config << "  {\n";
-  config << "    name = 'alert_json',\n";
-  config << "    file = true,\n";
-  config << "    filename = '" << logPath << "/snort.alert'\n";
-  config << "  }\n";
-  config << "}\n\n";
-
-  config << "pkt_logger = {\n";
-  config << "  file = true,\n";
-  config << "  limit = 1000\n";
-  config << "}\n";
-
-  config.close();
+  config(mode, configuredInterfaces);
 
   // Push Packet Capture Task
   for (auto &[iface, conf] : configuredInterfaces)
@@ -336,4 +290,91 @@ void sniff(const string &iface, auto &conf)
           }
         }
         return true; });
+}
+
+void parsePorts(const string &input, vector<string> &target) {
+    istringstream iss(input);
+    string port;
+    while (iss >> port)
+        target.push_back(port);
+}
+
+string join(const vector<string>& list, const string& sep) {
+    string out;
+    for (size_t i = 0; i < list.size(); ++i) {
+        out += list[i];
+        if (i != list.size() - 1)
+            out += sep;
+    }
+    return out;
+}
+
+void config(bool mode,
+    const std::vector<std::pair<std::string, NetworkConfig>>& configuredInterfaces)
+{
+    namespace fs = std::filesystem;
+    auto root = fs::current_path();
+    auto cfg = root / "config" / "snort.lua";
+    auto rules = root / "rules";
+    auto logs = root / "snort_logs";
+    std::ofstream out(cfg);
+    if (!out) return;
+
+    out << "include 'snort_defaults.lua'\n\n-- auto-generated snort.lua\n\n";
+
+    // Stream inspectors
+    out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
+    for (auto& [iface, nc] : configuredInterfaces) {
+        if (nc.HTTP_SERVERS.value_or(false)) out << "http_inspect = {}\n";
+        if (nc.SSH_SERVERS.value_or(false))  out << "ssh = {}\n";
+        if (nc.FTP_SERVERS.value_or(false))
+            out << "ftp_server = {}\nftp_client = {}\nftp_data = {}\n";
+        if (nc.SMTP_SERVERS.value_or(false)) out << "smtp = {}\n";
+        if (nc.SIP_SERVERS.value_or(false))  out << "sip = {}\n";
+    }
+    out << "\n";
+
+    // wizard curses (protocol auto-detection)
+    out << "wizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+
+    // Variables
+    std::vector<std::string> home, ext;
+    for (auto& [iface, nc] : configuredInterfaces) {
+        auto hn = nc.HOME_NET.value_or(getIpInterface(iface));
+        home.push_back("'" + hn + "'");
+        ext.push_back("'" + nc.EXTERNAL_NET.value_or("!" + hn) + "'");
+    }
+    auto join = [](const auto& v){
+        std::ostringstream ss;
+        for (size_t i=0; i < v.size(); ++i)
+            ss << v[i] << (i+1 < v.size()? ", ": "");
+        return ss.str();
+    };
+    out << "variables = {\n"
+        << "  HOME_NET = {" << join(home) << "},\n"
+        << "  EXTERNAL_NET = {" << join(ext) << "}\n}\n\n";
+
+    // DAQ & IPS
+    out << "daq_module = 'af_packet'\n"
+        << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n\n";
+    out << "ips = {\n"
+        << "  variables = default_variables,\n"
+        << "  rules     = '" << rules.string() << "/snort3-community.rules',\n"
+        << "  mode      = '" << (mode ? "inline" : "tap") << "',\n"
+        << "  enable_builtin_rules = true\n"
+        << "}\n\n";
+
+    // Logging
+    out << "loggers = {{ name='alert_json', file=true, filename='"
+        << logs.string() << "/snort.alert' }}\n\n";
+    out << "pkt_logger = { file=true, limit=1000 }\n\n";
+
+    // Binder with wizard last
+    out << "binder = {\n"
+        << "  { when={ proto='tcp' }, use={ type='stream_tcp' } },\n"
+        << "  { when={ proto='udp' }, use={ type='stream_udp' } },\n"
+        << "  { use={ type='wizard' } }\n"
+        << "}\n";
+
+    out.close();
 }

@@ -1,7 +1,7 @@
 logs/
 
-# Ignore snort3 binary build output
 bin/snort3/
 
-# Ignore Snort binary
 bin/snort3/build/src/snort
+
+config/snort.lua
