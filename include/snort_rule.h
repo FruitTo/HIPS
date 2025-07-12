@@ -10,6 +10,7 @@
 
 struct NetworkConfig {
    std::string NAME;
+   std::string IP;
 
    std::optional<std::string> HOME_NET;
    std::optional<std::string> EXTERNAL_NET;
@@ -20,6 +21,8 @@ struct NetworkConfig {
 
    std::vector<std::string> ORACLE_PORTS;
    std::vector<std::string> FILE_DATA_PORTS;
+   std::vector<std::string> SMTP_PORTS;
+   std::vector<std::string> TELNET_PORTS;
 
    std::optional<bool> HTTP_SERVERS;
    std::optional<bool> SSH_SERVERS;
