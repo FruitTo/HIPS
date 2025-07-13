@@ -9,6 +9,9 @@
 #include "./include/header_detection.h"
 #include "./include/tins/tins.h"
 
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -27,11 +30,10 @@ using namespace BS;
 using namespace chrono;
 namespace fs = filesystem;
 
-
 void parsePorts(const string &input, vector<string> &target);
-void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>>& configuredInterfaces);
-void sniff(const string &iface, auto &conf);
-string join(const vector<string>& list, const string& sep);
+void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> &configuredInterfaces);
+void sniff(const string &iface, auto &conf, int write_fd);
+string join(const vector<string> &list, const string &sep);
 
 auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
 
@@ -54,6 +56,7 @@ int main()
     NetworkConfig conf;
     char yesno;
     string input;
+
 
     conf.NAME = iface;
     conf.IP = getIpInterface(iface);
@@ -97,41 +100,42 @@ int main()
   // Create Config File
   config(mode, configuredInterfaces);
 
+  // Create pipe
+  const char *fifo_path = "/tmp/snort_fifo";
+  mkfifo(fifo_path, 0666);
+  if (mkfifo(fifo_path, 0666) == -1 && errno != EEXIST)
+  {
+    perror("mkfifo failed");
+    return 1;
+  }
+  else
+  {
+    cout << "mkfifo pass" << endl;
+  }
+
+  int write_fd;
+
+  pid_t pid = fork();
+  if (pid == 0)
+  {
+    execl("./snort.sh", "./snort.sh",
+          "-r", "/tmp/snort_fifo",
+          "-A", "alert_fast",
+          "-c", "./config/snort.lua",
+          nullptr);
+    _exit(1);
+  }
+  else
+  {
+    write_fd = open(fifo_path, O_WRONLY);
+  }
+
   // Push Packet Capture Task
   for (auto &[iface, conf] : configuredInterfaces)
   {
-    task.push_back(pool.submit_task([iface, conf]()
-                                    { sniff(iface, conf); }));
+    task.push_back(pool.submit_task([iface, conf, write_fd]()
+                                    { sniff(iface, conf, write_fd); }));
   }
-
-  // Push Create Subprocess Engine Task (Test Demo)
-  task.push_back(pool.submit_task([&]()
-                                  {
-    // Create pipe
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        perror("pipe failed");
-        return;
-    }
-
-    // Fork process (if value > 0 : process ID; if value == 0 : process is startign)
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(pipe_fd[0], STDIN_FILENO);
-        close(pipe_fd[1]);
-        char *args[] = {
-          (char *)"./snort.sh",
-          // (char *)"-r", (char *)"-",
-          (char *)"-A", (char *)"alert_fast",
-          NULL
-        };
-        execvp("./snort.sh", args);
-
-        perror("exec failed");
-        _exit(1);
-    }
-
-    close(pipe_fd[0]); }));
 
   for (auto &t : task)
   {
@@ -141,14 +145,17 @@ int main()
   return 0;
 }
 
-void sniff(const string &iface, auto &conf)
+void sniff(const string &iface, auto &conf, int write_fd)
 {
   // Initial Flow Variable
+  static std::mutex mtx;
   unordered_map<string, FlowEntry> flow_table;
   uint16_t bloom_counters[ARRAY_SIZE] = {0};
   uint64_t total_packets = 0;
   uint64_t total_flows = 0;
   auto last_cleanup = chrono::system_clock::now();
+
+  PacketWriter pcapWriter("/tmp/snort_fifo", DataLinkType<EthernetII>());
 
   // Initial Log Variable
   string currentDay = currentDate();
@@ -277,162 +284,142 @@ void sniff(const string &iface, auto &conf)
 
           // Detection
           if(headerDetection(packet, rules, conf)){
-            cout << "SRC : " << packet.src_addr << " -> DST : " << packet.dst_addr << endl;
+            pcapWriter.write(pkt);
+            // auto buf = pkt.pdu()->serialize();
+            // write(write_fd, buf.data(), buf.size());
           }
         }
         return true; });
 }
 
-void parsePorts(const string &input, vector<string> &target) {
-    istringstream iss(input);
-    string port;
-    while (iss >> port)
-        target.push_back(port);
-}
-
-string join(const vector<string>& list, const string& sep) {
-    string out;
-    for (size_t i = 0; i < list.size(); ++i) {
-        out += list[i];
-        if (i != list.size() - 1)
-            out += sep;
-    }
-    return out;
-}
-
-void config(bool mode,
-    const std::vector<std::pair<std::string, NetworkConfig>>& configuredInterfaces)
+void parsePorts(const string &input, vector<string> &target)
 {
-    namespace fs = std::filesystem;
-    auto root  = fs::current_path();
-    auto cfg   = root / "config" / "snort.lua";
-    auto rules = root / "rules";
-    auto logs  = root / "snort_logs";
+  istringstream iss(input);
+  string port;
+  while (iss >> port)
+    target.push_back(port);
+}
 
-    std::ofstream out(cfg);
-    if (!out) return;
+string join(const vector<string> &list, const string &sep)
+{
+  string out;
+  for (size_t i = 0; i < list.size(); ++i)
+  {
+    out += list[i];
+    if (i != list.size() - 1)
+      out += sep;
+  }
+  return out;
+}
 
-    out << "include 'snort_defaults.lua'\n\n-- auto-generated snort.lua\n\n";
+void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> &configuredInterfaces)
+{
+  namespace fs = std::filesystem;
+  auto root = fs::current_path();
+  auto cfg = root / "config" / "snort.lua";
+  auto logs = root / "snort_logs";
 
-    // 1) Inspector Modules: เปิดตาม service ที่ user เลือก
-    out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
-    bool need_http = false, need_ssh = false, need_ftp = false;
-    bool need_smtp = false, need_telnet = false, need_sip = false;
+  std::ofstream out(cfg);
+  if (!out)
+    return;
 
-    for (auto& [iface, nc] : configuredInterfaces) {
-        need_http   |= nc.HTTP_SERVERS.value_or(false);
-        need_ssh    |= nc.SSH_SERVERS.value_or(false);
-        need_ftp    |= nc.FTP_SERVERS.value_or(false);
-        need_smtp   |= nc.SMTP_SERVERS.value_or(false);
-        need_telnet |= nc.TELNET_SERVERS.value_or(false);
-        need_sip    |= nc.SIP_SERVERS.value_or(false);
+  out << "include 'snort_defaults.lua'\n\n-- auto-generated snort.lua\n\n";
+
+  // เปิด inspector ตามที่ต้องการ
+  bool need_http = false;
+  for (auto &[iface, nc] : configuredInterfaces)
+    need_http |= nc.HTTP_SERVERS.value_or(false);
+  out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
+  if (need_http)
+    out << "http_inspect = {}\n";
+  out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+
+  // รวมค่า HOME_NET และ HTTP_PORTS
+  std::set<std::string> home_ips;
+  std::set<std::string> http_ports;
+  for (auto &[iface, nc] : configuredInterfaces)
+  {
+    home_ips.insert("'" + nc.IP + "'");
+    if (nc.HTTP_SERVERS.value_or(false))
+      http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
+  }
+  if (need_http)
+  {
+    out << "HTTP_SERVERS = { " << [&]()
+    {
+      std::string s;
+      for (auto &v : home_ips)
+      {
+        if (!s.empty())
+          s += ", ";
+        s += v;
+      }
+      return s;
+    }() << " }\n";
+    out << "HTTP_PORTS = '" << [&]()
+    {
+      std::string s;
+      for (auto &v : http_ports)
+      {
+        if (!s.empty())
+          s += " ";
+        s += v;
+      }
+      return s;
+    }() << "'\n\n";
+  }
+
+  // HOME_NET และ EXTERNAL_NET
+  out << "variables = {\n"
+         "  HOME_NET = { ";
+  {
+    std::string s;
+    for (auto &v : home_ips)
+    {
+      if (!s.empty())
+        s += ", ";
+      s += v;
     }
-    if (need_http)   out << "http_inspect = {}\n";
-    if (need_ssh)    out << "ssh = {}\n";
-    if (need_ftp) {
-        out << "ftp_server = {}\nftp_client = {}\nftp_data = {}\n";
+    out << s;
+  }
+  out << " },\n"
+         "  EXTERNAL_NET = { ";
+  {
+    std::string s;
+    for (auto &v : home_ips)
+    {
+      if (!s.empty())
+        s += ", ";
+      s += "'!" + v.substr(1);
     }
-    if (need_smtp)   out << "smtp = {}\n";
-    if (need_telnet) out << "telnet = {}\n";
-    if (need_sip)    out << "sip = {}\n";
-    out << "\n";
+    out << s;
+  }
+  out << " }\n}\n\n";
 
-    // 2) Wizard setup สำหรับ autodetect
-    out << "wizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+  // ใช้ DAQ stdin ผ่าน pcap DAQ
+  out << "daq_module = 'pcap'\n"
+         "daq_mode = '"
+      << (mode ? "inline" : "passive") << "'\n\n";
 
-    // 3) รวบรวม IPs และ ports จากทุก interface
-    std::set<std::string> home_ips, ext_ips;
-    std::set<std::string> http_ports, ssh_ports, ftp_ports, smtp_ports, telnet_ports;
-    
-    for (auto& [iface, nc] : configuredInterfaces) {
-        home_ips.insert("'" + nc.IP + "'");
-        ext_ips.insert("'!" + nc.IP + "'");
+  out << "ips = {\n"
+         "  variables = default_variables,\n"
+         "  rules     = '"
+      << (root / "rules" / "snort3-community.rules").string() << "',\n"
+                                                                 "  mode      = '"
+      << (mode ? "inline" : "tap") << "',\n"
+                                      "  enable_builtin_rules = true\n"
+                                      "}\n\n";
 
-        http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
-        ssh_ports.insert(nc.SSH_PORTS.begin(), nc.SSH_PORTS.end());
-        ftp_ports.insert(nc.FTP_PORTS.begin(), nc.FTP_PORTS.end());
-        // สมมติว่า NetworkConfig มี SMTP_PORTS และ TELNET_PORTS
-        // ให้ผู้ใช้กรอกค่าพอร์ตเพิ่มเอง
-        smtp_ports.insert(nc.SMTP_PORTS.begin(), nc.SMTP_PORTS.end());
-        telnet_ports.insert(nc.TELNET_PORTS.begin(), nc.TELNET_PORTS.end());
-    }
+  // Loggers
+  out << "loggers = {{ name='alert_json', file=true, filename='" << logs.string() << "/snort.alert' }}\n";
+  out << "pkt_logger = { file=true, limit=1000 }\n\n";
 
-    auto join_set = [&](auto& s){
-        std::ostringstream ss;
-        bool first = true;
-        for (auto& v : s) {
-            if (!first) ss << " ";
-            ss << v;
-            first = false;
-        }
-        return ss.str();
-    };
-    auto join_list = [&](auto& s){
-        std::ostringstream ss;
-        bool first = true;
-        for (auto& v : s) {
-            if (!first) ss << ", ";
-            ss << v;
-            first = false;
-        }
-        return ss.str();
-    };
-
-    // 4) ประกาศ ports และ servers
-    if (need_http) {
-        out << "HTTP_SERVERS = { " << join_list(home_ips) << " }\n"
-            << "HTTP_PORTS = '" << join_set(http_ports) << "'\n";
-    }
-    if (need_ssh) {
-        out << "SSH_SERVERS = { " << join_list(home_ips) << " }\n"
-            << "SSH_PORTS = '" << join_set(ssh_ports) << "'\n";
-    }
-    if (need_ftp) {
-        out << "FTP_SERVERS = { " << join_list(home_ips) << " }\n"
-            << "FTP_PORTS = '" << join_set(ftp_ports) << "'\n";
-    }
-    if (need_smtp) {
-        out << "SMTP_SERVERS = { " << join_list(home_ips) << " }\n"
-            << "SMTP_PORTS = '" << join_set(smtp_ports) << "'\n";
-    }
-    if (need_telnet) {
-        out << "TELNET_SERVERS = { " << join_list(home_ips) << " }\n"
-            << "TELNET_PORTS = '" << join_set(telnet_ports) << "'\n";
-    }
-    out << "\n";
-
-    // 5) HOME_NET / EXTERNAL_NET
-    out << "variables = {\n"
-        << "  HOME_NET = { " << join_list(home_ips) << " },\n"
-        << "  EXTERNAL_NET = { " << join_list(ext_ips) << " }\n}\n\n";
-
-    // 6) DAQ/IPS
-    out << "daq_module = 'af_packet'\n"
-           "daq_mode = '" << (mode ? "inline" : "passive") << "'\n\n"
-           "ips = {\n"
-           "  variables = default_variables,\n"
-           "  rules     = '" << rules.string() << "/snort3-community.rules',\n"
-           "  mode      = '" << (mode ? "inline" : "tap") << "',\n"
-           "  enable_builtin_rules = true\n"
-           "}\n\n";
-
-    // 7) Loggers
-    out << "loggers = {{ name='alert_json', file=true, filename='"
-           << logs.string() << "/snort.alert' }}\n\n"
-        << "pkt_logger = { file=true, limit=1000 }\n\n";
-
-    // 8) Binder
-    out << "binder = {\n"
-           "  { when={ proto='tcp' }, use={ type='stream_tcp' } },\n"
-           "  { when={ proto='udp' }, use={ type='stream_udp' } },\n";
-    if (need_http)   out << "  { when={ service='http' }, use={ type='http_inspect' } },\n";
-    if (need_ssh)    out << "  { when={ service='ssh'  }, use={ type='ssh' } },\n";
-    if (need_ftp)    out << "  { when={ service='ftp'  }, use={ type='ftp_server' } },\n";
-    if (need_smtp)   out << "  { when={ service='smtp' }, use={ type='smtp' } },\n";
-    if (need_telnet) out << "  { when={ service='telnet' }, use={ type='telnet' } },\n";
-    if (need_sip)    out << "  { when={ service='sip' }, use={ type='sip' } },\n";
-    out << "  { use={ type='wizard' } }\n"
-           "}\n";
-
-    out.close();
+  // Binder
+  out << "binder = {\n"
+         "  { when={ proto='tcp' }, use={ type='stream_tcp' } },\n"
+         "  { when={ proto='udp' }, use={ type='stream_udp' } },\n";
+  if (need_http)
+    out << "  { when={ service='http' }, use={ type='http_inspect' } },\n";
+  out << "  { use={ type='wizard' } }\n};\n";
+  out.close();
 }
