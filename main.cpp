@@ -31,8 +31,8 @@ using namespace chrono;
 namespace fs = filesystem;
 
 void parsePorts(const string &input, vector<string> &target);
-void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> &configuredInterfaces);
-void sniff(const string &iface, auto &conf);
+void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
+void sniff(NetworkConfig &conf);
 string join(const vector<string> &list, const string &sep);
 
 auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
@@ -40,7 +40,7 @@ auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules
 int main()
 {
   vector<string> interfaceName = getInterfaceName();
-  vector<pair<string, NetworkConfig>> configuredInterfaces;
+  vector<NetworkConfig> configuredInterfaces;
   thread_pool pool(interfaceName.size() + 1);
   vector<future<void>> task;
 
@@ -94,7 +94,7 @@ int main()
     cin.ignore();
     conf.SIP_SERVERS = (yesno == 'y' || yesno == 'Y');
 
-    configuredInterfaces.emplace_back(iface, conf);
+    configuredInterfaces.push_back(conf);
   }
 
   // Create Config File
@@ -129,10 +129,9 @@ int main()
   }
 
   // Push Packet Capture Task
-  for (auto &[iface, conf] : configuredInterfaces)
+  for (NetworkConfig &conf : configuredInterfaces)
   {
-    task.push_back(pool.submit_task([iface, conf]()
-                                    { sniff(iface, conf); }));
+    task.push_back(pool.submit_task([&conf]() { sniff(conf); }));
   }
 
   for (auto &t : task)
@@ -143,7 +142,7 @@ int main()
   return 0;
 }
 
-void sniff(const string &iface, auto &conf)
+void sniff(NetworkConfig &conf)
 {
   // Initial Flow Variable
   static std::mutex mtx;
@@ -160,12 +159,12 @@ void sniff(const string &iface, auto &conf)
   string currentTime = timeStamp();
   string currentPath = getPath();
   filesystem::create_directories(currentPath);
-  auto writer = make_unique<PacketWriter>(currentPath + iface + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
+  auto writer = make_unique<PacketWriter>(currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
 
   // Capture Packet (Sniffer)
   SnifferConfiguration config;
   config.set_promisc_mode(true);
-  Sniffer sniffer(iface, config);
+  Sniffer sniffer(conf.NAME, config);
   sniffer.sniff_loop([&](Packet &pkt)
                      {
         total_packets++;
@@ -184,7 +183,7 @@ void sniff(const string &iface, auto &conf)
           currentDay = date;
           currentPath = path;
           filesystem::create_directories(currentPath);
-          writer = make_unique<PacketWriter>(currentPath + iface + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
+          writer = make_unique<PacketWriter>(currentPath + conf.NAME + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
         }
         writer->write(pkt);
         
@@ -310,7 +309,7 @@ string join(const vector<string> &list, const string &sep)
   return out;
 }
 
-void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> &configuredInterfaces)
+void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 {
   namespace fs = std::filesystem;
   auto root = fs::current_path();
@@ -325,7 +324,7 @@ void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> 
 
   // เปิด inspector ตามที่ต้องการ
   bool need_http = false;
-  for (auto &[iface, nc] : configuredInterfaces)
+  for (auto &nc : configuredInterfaces)
     need_http |= nc.HTTP_SERVERS.value_or(false);
   out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
   if (need_http)
@@ -335,7 +334,7 @@ void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> 
   // รวมค่า HOME_NET และ HTTP_PORTS
   std::set<std::string> home_ips;
   std::set<std::string> http_ports;
-  for (auto &[iface, nc] : configuredInterfaces)
+  for (const NetworkConfig &nc : configuredInterfaces)
   {
     home_ips.insert("'" + nc.IP + "'");
     if (nc.HTTP_SERVERS.value_or(false))
