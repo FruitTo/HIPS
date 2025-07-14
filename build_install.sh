@@ -57,7 +57,7 @@ cmake .. \
   -DHWLOC_LIBRARY=$(realpath "$DEPENDENCIES_DIR/lib/libhwloc.so")
 
 # Build Snort (use -j1 to avoid compiler issues)
-make -j1
+make -j4
 
 # Install Snort
 make install
