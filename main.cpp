@@ -32,7 +32,7 @@ namespace fs = filesystem;
 
 void parsePorts(const string &input, vector<string> &target);
 void config(bool mode, const std::vector<std::pair<std::string, NetworkConfig>> &configuredInterfaces);
-void sniff(const string &iface, auto &conf, int write_fd);
+void sniff(const string &iface, auto &conf);
 string join(const vector<string> &list, const string &sep);
 
 auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
@@ -44,6 +44,7 @@ int main()
   thread_pool pool(interfaceName.size() + 1);
   vector<future<void>> task;
 
+  // Select Mode.
   bool mode;
   char modeInput;
   cout << "IPS Mode ? [y/n]" << endl;
@@ -56,7 +57,6 @@ int main()
     NetworkConfig conf;
     char yesno;
     string input;
-
 
     conf.NAME = iface;
     conf.IP = getIpInterface(iface);
@@ -113,8 +113,6 @@ int main()
     cout << "mkfifo pass" << endl;
   }
 
-  int write_fd;
-
   pid_t pid = fork();
   if (pid == 0)
   {
@@ -127,14 +125,14 @@ int main()
   }
   else
   {
-    write_fd = open(fifo_path, O_WRONLY);
+    open(fifo_path, O_WRONLY);
   }
 
   // Push Packet Capture Task
   for (auto &[iface, conf] : configuredInterfaces)
   {
-    task.push_back(pool.submit_task([iface, conf, write_fd]()
-                                    { sniff(iface, conf, write_fd); }));
+    task.push_back(pool.submit_task([iface, conf]()
+                                    { sniff(iface, conf); }));
   }
 
   for (auto &t : task)
@@ -145,7 +143,7 @@ int main()
   return 0;
 }
 
-void sniff(const string &iface, auto &conf, int write_fd)
+void sniff(const string &iface, auto &conf)
 {
   // Initial Flow Variable
   static std::mutex mtx;
