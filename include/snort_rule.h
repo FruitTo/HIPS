@@ -24,14 +24,14 @@ struct NetworkConfig {
    std::vector<std::string> SMTP_PORTS;
    std::vector<std::string> TELNET_PORTS;
 
-   std::optional<bool> HTTP_SERVERS;
-   std::optional<bool> SSH_SERVERS;
-   std::optional<bool> FTP_SERVERS;
+   std::optional<bool> HTTP_SERVERS = false;
+   std::optional<bool> SSH_SERVERS = false;
+   std::optional<bool> FTP_SERVERS = false;
 
-   std::optional<bool> TELNET_SERVERS;
-   std::optional<bool> SMTP_SERVERS;
-   std::optional<bool> SIP_SERVERS;
-   std::optional<bool> SQL_SERVERS;
+   std::optional<bool> TELNET_SERVERS = false;
+   std::optional<bool> SMTP_SERVERS = false;
+   std::optional<bool> SIP_SERVERS = false;
+   std::optional<bool> SQL_SERVERS = false;
 };
 
 struct GeneralOption

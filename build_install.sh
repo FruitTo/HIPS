@@ -54,12 +54,18 @@ cmake .. \
   -DPCRE2_PCRE2_LIBRARY=$(realpath "$DEPENDENCIES_DIR/lib/libpcre2-8.so") \
   -DZLIB_LIBRARY=$(realpath "$DEPENDENCIES_DIR/lib/libz.so") \
   -DLUAJIT_LIBRARY=$(realpath "$DEPENDENCIES_DIR/lib/libluajit-5.1.so") \
-  -DHWLOC_LIBRARY=$(realpath "$DEPENDENCIES_DIR/lib/libhwloc.so")
+  -DHWLOC_LIBRARY=$(realpath "$DEPENDENCIES_DIR/lib/libhwloc.so") \
+  -DENABLE_DAQ_SOCKET=ON
 
 # Build Snort (use -j1 to avoid compiler issues)
 make -j4
 
 # Install Snort
 make install
+
+mkdir -p snort_logs
+
+chmod 755 snort_logs
+
 
 echo "Snort has been successfully installed in $INSTALL_DIR"

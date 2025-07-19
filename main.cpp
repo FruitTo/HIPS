@@ -23,6 +23,9 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <thread>
 
 using namespace std;
 using namespace Tins;
@@ -35,14 +38,15 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 void sniff(NetworkConfig &conf);
 string join(const vector<string> &list, const string &sep);
 
-auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
+auto rules = SnortRuleParser::parseRulesFromFile("./rules/test.rules");
 
 int main()
 {
   vector<string> interfaceName = getInterfaceName();
   vector<NetworkConfig> configuredInterfaces;
-  thread_pool pool(interfaceName.size() + 1);
+  thread_pool pool(interfaceName.size());
   vector<future<void>> task;
+  cout << "Rule:" << rules["tcp"].size() << endl;
 
   // Select Mode.
   bool mode;
@@ -100,38 +104,22 @@ int main()
   // Create Config File
   config(mode, configuredInterfaces);
 
-  // Create pipe
-  const char *fifo_path = "/tmp/snort_fifo";
-  mkfifo(fifo_path, 0666);
-  if (mkfifo(fifo_path, 0666) == -1 && errno != EEXIST)
-  {
-    perror("mkfifo failed");
-    return 1;
-  }
-  else
-  {
-    cout << "mkfifo pass" << endl;
-  }
-
   pid_t pid = fork();
   if (pid == 0)
   {
-    execl("./snort.sh", "./snort.sh",
-          "-r", "/tmp/snort_fifo",
-          "-A", "alert_fast",
+    execl("./snort.sh", "snort.sh",
+          "--snaplen", "65535",
           "-c", "./config/snort.lua",
+          "-v",
           nullptr);
+    perror("execl failed");
     _exit(1);
   }
-  else
-  {
-    open(fifo_path, O_WRONLY);
-  }
 
-  // Push Packet Capture Task
   for (NetworkConfig &conf : configuredInterfaces)
   {
-    task.push_back(pool.submit_task([&conf]() { sniff(conf); }));
+    task.push_back(pool.submit_task([&conf]()
+                                    { sniff(conf); }));
   }
 
   for (auto &t : task)
@@ -145,14 +133,12 @@ int main()
 void sniff(NetworkConfig &conf)
 {
   // Initial Flow Variable
-  static std::mutex mtx;
+  static mutex mtx;
   unordered_map<string, FlowEntry> flow_table;
   uint16_t bloom_counters[ARRAY_SIZE] = {0};
   uint64_t total_packets = 0;
   uint64_t total_flows = 0;
   auto last_cleanup = chrono::system_clock::now();
-
-  PacketWriter pcapWriter("/tmp/snort_fifo", DataLinkType<EthernetII>());
 
   // Initial Log Variable
   string currentDay = currentDate();
@@ -161,6 +147,28 @@ void sniff(NetworkConfig &conf)
   filesystem::create_directories(currentPath);
   auto writer = make_unique<PacketWriter>(currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
 
+  // Connect To Socket
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0)
+  {
+    perror("socket");
+    exit(1);
+  }
+
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  std::string sock_path = "./tmp/snort.sock";
+  strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);
+  if (connect(fd, (sockaddr *)&addr, sizeof(addr)) < 0)
+  {
+    perror("connect");
+    exit(1);
+  }
+  else
+  {
+    cout << "✅ Connected to snort socket." << endl;
+  }
+
   // Capture Packet (Sniffer)
   SnifferConfiguration config;
   config.set_promisc_mode(true);
@@ -168,7 +176,7 @@ void sniff(NetworkConfig &conf)
   sniffer.sniff_loop([&](Packet &pkt)
                      {
         total_packets++;
-        
+
         // Check Flow Time Expire
         auto now = chrono::system_clock::now();
         if (now - last_cleanup > chrono::minutes(1)) {
@@ -281,7 +289,7 @@ void sniff(NetworkConfig &conf)
 
           // Detection
           if(headerDetection(packet, rules, conf)){
-            pcapWriter.write(pkt);
+            cout << "Forwarded" << endl;
             // auto buf = pkt.pdu()->serialize();
             // write(write_fd, buf.data(), buf.size());
           }
@@ -311,104 +319,119 @@ string join(const vector<string> &list, const string &sep)
 
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 {
-  namespace fs = std::filesystem;
+  namespace fs = filesystem;
   auto root = fs::current_path();
   auto cfg = root / "config" / "snort.lua";
   auto logs = root / "snort_logs";
 
-  std::ofstream out(cfg);
+  fs::create_directories(logs);
+
+  ofstream out(cfg);
   if (!out)
     return;
 
   out << "include 'snort_defaults.lua'\n\n-- auto-generated snort.lua\n\n";
+  out << "wizard = default_wizard\n\n";
 
-  // เปิด inspector ตามที่ต้องการ
   bool need_http = false;
   for (auto &nc : configuredInterfaces)
     need_http |= nc.HTTP_SERVERS.value_or(false);
+
   out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
   if (need_http)
     out << "http_inspect = {}\n";
   out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
 
-  // รวมค่า HOME_NET และ HTTP_PORTS
-  std::set<std::string> home_ips;
-  std::set<std::string> http_ports;
-  for (const NetworkConfig &nc : configuredInterfaces)
+  // รวม IP และ HTTP PORTS
+  set<string> home_ips;
+  set<string> http_ports;
+  for (const auto &nc : configuredInterfaces)
   {
     home_ips.insert("'" + nc.IP + "'");
     if (nc.HTTP_SERVERS.value_or(false))
       http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
   }
+
+  // เขียน HTTP_SERVERS และ HTTP_PORTS
   if (need_http)
   {
-    out << "HTTP_SERVERS = { " << [&]()
+    ostringstream ip_list;
+    bool first = true;
+    for (const auto &ip : home_ips)
     {
-      std::string s;
-      for (auto &v : home_ips)
-      {
-        if (!s.empty())
-          s += ", ";
-        s += v;
-      }
-      return s;
-    }() << " }\n";
-    out << "HTTP_PORTS = '" << [&]()
+      if (!first)
+        ip_list << ", ";
+      ip_list << ip;
+      first = false;
+    }
+    out << "HTTP_SERVERS = { " << ip_list.str() << " }\n";
+
+    ostringstream port_list;
+    first = true;
+    for (const auto &port : http_ports)
     {
-      std::string s;
-      for (auto &v : http_ports)
-      {
-        if (!s.empty())
-          s += " ";
-        s += v;
-      }
-      return s;
-    }() << "'\n\n";
+      if (!first)
+        port_list << " ";
+      port_list << port;
+      first = false;
+    }
+    out << "HTTP_PORTS = '" << port_list.str() << "'\n\n";
   }
 
   // HOME_NET และ EXTERNAL_NET
-  out << "variables = {\n"
-         "  HOME_NET = { ";
+  out << "variables = {\n  HOME_NET = { ";
   {
-    std::string s;
-    for (auto &v : home_ips)
+    bool first = true;
+    for (const auto &ip : home_ips)
     {
-      if (!s.empty())
-        s += ", ";
-      s += v;
+      if (!first)
+        out << ", ";
+      out << ip;
+      first = false;
     }
-    out << s;
   }
-  out << " },\n"
-         "  EXTERNAL_NET = { ";
+  out << " },\n  EXTERNAL_NET = { ";
   {
-    std::string s;
-    for (auto &v : home_ips)
+    bool first = true;
+    for (const auto &ip : home_ips)
     {
-      if (!s.empty())
-        s += ", ";
-      s += "'!" + v.substr(1);
+      string raw_ip = ip.substr(1, ip.length() - 2); // remove surrounding quotes
+      if (!first)
+        out << ", ";
+      out << "'!" << raw_ip << "'";
+      first = false;
     }
-    out << s;
   }
   out << " }\n}\n\n";
 
-  // ใช้ DAQ stdin ผ่าน pcap DAQ
-  out << "daq_module = 'pcap'\n"
-         "daq_mode = '"
-      << (mode ? "inline" : "passive") << "'\n\n";
+  // DAQ
+  out << "daq_module = 'socket'\n";
+  out << "daq_mode = 'inline'\n";
+  // out << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n";
+  out << "daq_var = { socket = './tmp/snort.sock'}\n\n";
 
+  // IPS Config
   out << "ips = {\n"
          "  variables = default_variables,\n"
-         "  rules     = '"
-      << (root / "rules" / "snort3-community.rules").string() << "',\n"
-                                                                 "  mode      = '"
+         "  include     = '"
+      << (root / "rules" / "test.rules").string() << "',\n"
+                                                     "  mode      = '"
       << (mode ? "inline" : "tap") << "',\n"
-                                      "  enable_builtin_rules = true\n"
+                                      "  enable_builtin_rules = false\n"
                                       "}\n\n";
 
-  // Loggers
-  out << "loggers = {{ name='alert_json', file=true, filename='" << logs.string() << "/snort.alert' }}\n";
+  // Logging
+  out << "loggers = {\n"
+         "  {\n"
+         "    name = 'alert_json',\n"
+         "    file = true,\n"
+         "    filename = '"
+      << (logs / "snort.alert").string() << "',\n"
+                                            "    limit = 100,\n"
+                                            "    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'\n"
+                                            "  }\n"
+                                            "}\n\n";
+
   out << "pkt_logger = { file=true, limit=1000 }\n\n";
 
   // Binder
@@ -418,5 +441,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   if (need_http)
     out << "  { when={ service='http' }, use={ type='http_inspect' } },\n";
   out << "  { use={ type='wizard' } }\n};\n";
+
   out.close();
 }
