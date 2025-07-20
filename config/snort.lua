@@ -7,18 +7,20 @@ wizard = default_wizard
 stream = {}
 stream_tcp = {}
 stream_udp = {}
+http_inspect = {}
 
 wizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }
+
+HTTP_SERVERS = { '127.0.0.1' }
+HTTP_PORTS = '8000'
 
 variables = {
   HOME_NET = { '127.0.0.1' },
   EXTERNAL_NET = { '!127.0.0.1' }
 }
 
-daq_module = 'socket'
-daq_mode = 'inline'
-daq_var = { socket = './tmp/snort.sock'}
-
+daq_module = 'afpacket'
+daq_mode = 'passive'
 ips = {
   variables = default_variables,
   include     = '/home/fruitto/Project/HIPS/rules/test.rules',
@@ -41,5 +43,6 @@ pkt_logger = { file=true, limit=1000 }
 binder = {
   { when={ proto='tcp' }, use={ type='stream_tcp' } },
   { when={ proto='udp' }, use={ type='stream_udp' } },
+  { when={ service='http' }, use={ type='http_inspect' } },
   { use={ type='wizard' } }
 };

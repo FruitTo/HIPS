@@ -116,13 +116,18 @@ int main()
   pid_t pid = fork();
   if (pid == 0)
   {
-    execl("./snort.sh", "snort.sh",
-          "--snaplen", "65535",
-          "-c", "./config/snort.lua",
-          "-v",
-          nullptr);
-    perror("execl failed");
-    _exit(1);
+            char const* argv[] = {
+            "ip", "netns", "exec", "ns2",
+            "./snort.sh",
+            "--snaplen", "65535",
+            "-c", "./config/snort.lua",
+            "-i", "veth1:veth0",
+            "-Q", "-v",
+            nullptr
+        };
+        execvp(argv[0], const_cast<char* const*>(argv));
+        perror("execvp failed");
+        _exit(1);
   }
 
   for (NetworkConfig &conf : configuredInterfaces)
@@ -141,6 +146,8 @@ int main()
 
 void sniff(NetworkConfig &conf)
 {
+  PacketSender sender("veth0");
+
   // Initial Flow Variable
   static mutex mtx;
   unordered_map<string, FlowEntry> flow_table;
@@ -277,6 +284,7 @@ void sniff(NetworkConfig &conf)
           // Detection
           if(headerDetection(packet, rules, conf)){
             cout << "Forwarded" << endl;
+            sender.send(*pdu);
             // auto buf = pkt.pdu()->serialize();
             // write(write_fd, buf.data(), buf.size());
           }
@@ -392,10 +400,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   out << " }\n}\n\n";
 
   // DAQ
-  out << "daq_module = 'socket'\n";
-  out << "daq_mode = 'inline'\n";
-  // out << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n";
-  out << "daq_var = { socket = './tmp/snort.sock'}\n\n";
+  out << "daq_module = 'afpacket'\n";
+  out << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n";
 
   // IPS Config
   out << "ips = {\n"
