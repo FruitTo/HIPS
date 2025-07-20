@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Define the base directory
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 

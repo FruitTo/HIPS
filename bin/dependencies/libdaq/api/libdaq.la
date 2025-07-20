@@ -38,4 +38,4 @@ dlopen=''
 dlpreopen=''
 
 # Directory that this library needs to be installed in:
-libdir='/home/fruitto/Project/engine/bin/dependencies/lib'
+libdir='/home/fruitto/Project/HIPS/bin/dependencies/libdaq/../lib'

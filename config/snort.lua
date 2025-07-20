@@ -7,12 +7,8 @@ wizard = default_wizard
 stream = {}
 stream_tcp = {}
 stream_udp = {}
-http_inspect = {}
 
 wizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }
-
-HTTP_SERVERS = { '127.0.0.1' }
-HTTP_PORTS = '8000'
 
 variables = {
   HOME_NET = { '127.0.0.1' },
@@ -45,6 +41,5 @@ pkt_logger = { file=true, limit=1000 }
 binder = {
   { when={ proto='tcp' }, use={ type='stream_tcp' } },
   { when={ proto='udp' }, use={ type='stream_udp' } },
-  { when={ service='http' }, use={ type='http_inspect' } },
   { use={ type='wizard' } }
 };

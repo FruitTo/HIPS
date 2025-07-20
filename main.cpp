@@ -104,6 +104,15 @@ int main()
   // Create Config File
   config(mode, configuredInterfaces);
 
+  // Create Virtual Interface
+  int ret = system("sudo ./virtual_interface.sh");
+  if (ret != 0)
+  {
+    cerr << "Error :" << ret << "\n";
+    return 1;
+  }
+
+  // Create Snort Process
   pid_t pid = fork();
   if (pid == 0)
   {
@@ -146,28 +155,6 @@ void sniff(NetworkConfig &conf)
   string currentPath = getPath();
   filesystem::create_directories(currentPath);
   auto writer = make_unique<PacketWriter>(currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
-
-  // Connect To Socket
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (fd < 0)
-  {
-    perror("socket");
-    exit(1);
-  }
-
-  sockaddr_un addr{};
-  addr.sun_family = AF_UNIX;
-  std::string sock_path = "./tmp/snort.sock";
-  strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);
-  if (connect(fd, (sockaddr *)&addr, sizeof(addr)) < 0)
-  {
-    perror("connect");
-    exit(1);
-  }
-  else
-  {
-    cout << "✅ Connected to snort socket." << endl;
-  }
 
   // Capture Packet (Sniffer)
   SnifferConfiguration config;

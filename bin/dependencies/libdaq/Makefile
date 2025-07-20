@@ -15,7 +15,7 @@
 
 
 # aminclude_static.am generated automatically by Autoconf
-# from AX_AM_MACROS_STATIC on Fri Jul  4 11:35:18 +07 2025
+# from AX_AM_MACROS_STATIC on Sat Jul 19 19:51:05 +07 2025
 
 
 am__is_gnu_make = { \
@@ -269,17 +269,17 @@ distuninstallcheck_listfiles = find . -type f -print
 am__distuninstallcheck_listfiles = $(distuninstallcheck_listfiles) \
   | sed 's|^\./|$(prefix)/|' | grep -v '$(infodir)/dir$$'
 distcleancheck_listfiles = find . -type f -print
-ACLOCAL = ${SHELL} '/home/fruitto/Project/engine/bin/dependencies/libdaq/missing' aclocal-1.16
+ACLOCAL = ${SHELL} '/home/fruitto/Project/HIPS/bin/dependencies/libdaq/missing' aclocal-1.16
 AMTAR = $${TAR-tar}
 AM_CFLAGS =  -Wstrict-prototypes -Wmissing-prototypes -Wold-style-definition -Wnested-externs
 AM_CPPFLAGS =  -fvisibility=hidden -Wall -Wmissing-declarations -Wpointer-arith -Wcast-align -Wcast-qual -Wformat -Wformat-nonliteral -Wformat-security -Wundef -Wwrite-strings -Wextra -Wsign-compare -Wno-unused-parameter -fno-strict-aliasing -fdiagnostics-show-option
 AM_DEFAULT_VERBOSITY = 1
 AR = ar
-AUTOCONF = ${SHELL} '/home/fruitto/Project/engine/bin/dependencies/libdaq/missing' autoconf
-AUTOHEADER = ${SHELL} '/home/fruitto/Project/engine/bin/dependencies/libdaq/missing' autoheader
-AUTOMAKE = ${SHELL} '/home/fruitto/Project/engine/bin/dependencies/libdaq/missing' automake-1.16
+AUTOCONF = ${SHELL} '/home/fruitto/Project/HIPS/bin/dependencies/libdaq/missing' autoconf
+AUTOHEADER = ${SHELL} '/home/fruitto/Project/HIPS/bin/dependencies/libdaq/missing' autoheader
+AUTOMAKE = ${SHELL} '/home/fruitto/Project/HIPS/bin/dependencies/libdaq/missing' automake-1.16
 AWK = mawk
-CC = clang
+CC = gcc
 CCDEPMODE = depmode=gcc3
 CFLAGS = -g -O2
 CFLAG_VISIBILITY = -fvisibility=hidden
@@ -290,12 +290,12 @@ CODE_COVERAGE_CPPFLAGS =
 CODE_COVERAGE_CXXFLAGS = 
 CODE_COVERAGE_ENABLED = no
 CODE_COVERAGE_LIBS = 
-CPP = clang -E
+CPP = gcc -E
 CPPFLAGS = 
 CSCOPE = cscope
 CTAGS = ctags
-CXX = clang++ -std=gnu++11
-CXXCPP = clang++ -std=gnu++11 -E
+CXX = g++ -std=gnu++11
+CXXCPP = g++ -std=gnu++11 -E
 CXXDEPMODE = depmode=gcc3
 CXXFLAGS = -g -O2
 CYGPATH_W = echo
@@ -342,7 +342,7 @@ LIPO =
 LN_S = ln -s
 LTLIBOBJS = 
 LT_SYS_LIBRARY_PATH = 
-MAKEINFO = ${SHELL} '/home/fruitto/Project/engine/bin/dependencies/libdaq/missing' makeinfo
+MAKEINFO = ${SHELL} '/home/fruitto/Project/HIPS/bin/dependencies/libdaq/missing' makeinfo
 MANIFEST_TOOL = :
 MKDIR_P = /usr/bin/mkdir -p
 NETMAP_CPPFLAGS = 
@@ -371,13 +371,13 @@ SET_MAKE =
 SHELL = /bin/bash
 STRIP = strip
 VERSION = 3.0.20
-abs_builddir = /home/fruitto/Project/engine/bin/dependencies/libdaq
-abs_srcdir = /home/fruitto/Project/engine/bin/dependencies/libdaq
-abs_top_builddir = /home/fruitto/Project/engine/bin/dependencies/libdaq
-abs_top_srcdir = /home/fruitto/Project/engine/bin/dependencies/libdaq
+abs_builddir = /home/fruitto/Project/HIPS/bin/dependencies/libdaq
+abs_srcdir = /home/fruitto/Project/HIPS/bin/dependencies/libdaq
+abs_top_builddir = /home/fruitto/Project/HIPS/bin/dependencies/libdaq
+abs_top_srcdir = /home/fruitto/Project/HIPS/bin/dependencies/libdaq
 ac_ct_AR = ar
-ac_ct_CC = clang
-ac_ct_CXX = 
+ac_ct_CC = gcc
+ac_ct_CXX = g++
 ac_ct_DUMPBIN = 
 am__include = include
 am__leading_dot = .
@@ -406,7 +406,7 @@ ifGNUmake =
 ifnGNUmake = 
 includedir = ${prefix}/include
 infodir = ${datarootdir}/info
-install_sh = ${SHELL} /home/fruitto/Project/engine/bin/dependencies/libdaq/install-sh
+install_sh = ${SHELL} /home/fruitto/Project/HIPS/bin/dependencies/libdaq/install-sh
 libdir = ${exec_prefix}/lib
 libexecdir = ${exec_prefix}/libexec
 localedir = ${datarootdir}/locale
@@ -416,7 +416,7 @@ mkdir_p = $(MKDIR_P)
 oldincludedir = /usr/include
 pdfdir = ${docdir}
 pkgconfigdir = ${libdir}/pkgconfig
-prefix = /home/fruitto/Project/engine/bin/dependencies
+prefix = /home/fruitto/Project/HIPS/bin/dependencies/libdaq/..
 program_transform_name = s,x,x,
 psdir = ${docdir}
 runstatedir = ${localstatedir}/run
