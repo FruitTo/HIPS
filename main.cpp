@@ -38,7 +38,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 void sniff(NetworkConfig &conf);
 string join(const vector<string> &list, const string &sep);
 
-auto rules = SnortRuleParser::parseRulesFromFile("./rules/test.rules");
+auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
 
 int main()
 {
@@ -116,18 +116,19 @@ int main()
   pid_t pid = fork();
   if (pid == 0)
   {
-            char const* argv[] = {
-            "ip", "netns", "exec", "ns2",
-            "./snort.sh",
-            "--snaplen", "65535",
-            "-c", "./config/snort.lua",
-            "-i", "veth1:veth0",
-            "-Q", "-v",
-            nullptr
-        };
-        execvp(argv[0], const_cast<char* const*>(argv));
-        perror("execvp failed");
-        _exit(1);
+    char const *argv[] = {
+        "ip", "netns", "exec", "ns2",
+        "./snort.sh",
+        "--snaplen", "65535",
+        "-c", "./config/snort.lua",
+        "-i", "veth1",
+        "-l", "./snort_logs",
+        "-A", "fast",
+        "-v",
+        nullptr};
+    execvp(argv[0], const_cast<char *const *>(argv));
+    perror("execvp failed");
+    _exit(1);
   }
 
   for (NetworkConfig &conf : configuredInterfaces)
@@ -334,7 +335,14 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 
   out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
   if (need_http)
-    out << "http_inspect = {}\n";
+  {
+    out << "http_inspect = {\n"
+           "  request_depth = -1,\n"
+           "  response_depth = -1,\n"
+           "  unzip = true,\n"
+           "  normalize_utf = true\n"
+           "}\n";
+  }
   out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
 
   // รวม IP และ HTTP PORTS
@@ -374,41 +382,55 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
 
   // HOME_NET และ EXTERNAL_NET
-  out << "variables = {\n  HOME_NET = { ";
+  // HOME_NET
+  if (home_ips.size() > 1)
   {
+    out << "HOME_NET = { ";
     bool first = true;
-    for (const auto &ip : home_ips)
+    for (auto &ip : home_ips)
     {
       if (!first)
         out << ", ";
       out << ip;
       first = false;
     }
+    out << " }\n";
   }
-  out << " },\n  EXTERNAL_NET = { ";
+  else
   {
+    out << "HOME_NET = " << *home_ips.begin() << "\n";
+  }
+
+  // EXTERNAL_NET
+  if (home_ips.size() > 1)
+  {
+    out << "EXTERNAL_NET = { ";
     bool first = true;
-    for (const auto &ip : home_ips)
+    for (auto &ip : home_ips)
     {
-      string raw_ip = ip.substr(1, ip.length() - 2); // remove surrounding quotes
+      string raw_ip = ip.substr(1, ip.size() - 2);
       if (!first)
         out << ", ";
       out << "'!" << raw_ip << "'";
       first = false;
     }
+    out << " }\n\n";
   }
-  out << " }\n}\n\n";
+  else
+  {
+    string raw_ip = (*home_ips.begin()).substr(1, (*home_ips.begin()).size() - 2);
+    out << "EXTERNAL_NET = '!" << raw_ip << "'\n\n";
+  }
 
   // DAQ
   out << "daq_module = 'afpacket'\n";
   out << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n";
 
-  // IPS Config
   out << "ips = {\n"
          "  variables = default_variables,\n"
          "  include     = '"
-      << (root / "rules" / "test.rules").string() << "',\n"
-                                                     "  mode      = '"
+      << (root / "rules" / "snort3-community.rules").string() << "',\n"
+                                                                 "  mode        = '"
       << (mode ? "inline" : "tap") << "',\n"
                                       "  enable_builtin_rules = false\n"
                                       "}\n\n";

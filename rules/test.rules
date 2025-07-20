@@ -1,1 +1,0 @@
-alert tcp any any -> any 8000 (msg:"HTTP GET Detected"; flow:to_server,established; http_method; content:"GET"; sid:1001003; rev:1;)
