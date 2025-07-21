@@ -38,7 +38,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 void sniff(NetworkConfig &conf);
 string join(const vector<string> &list, const string &sep);
 
-auto rules = SnortRuleParser::parseRulesFromFile("./rules/snort3-community.rules");
+auto rules = SnortRuleParser::parseRulesFromFile("./rules/default.rules");
 
 int main()
 {
@@ -312,29 +312,39 @@ string join(const vector<string> &list, const string &sep)
   }
   return out;
 }
-
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 {
   namespace fs = filesystem;
   auto root = fs::current_path();
   auto cfg = root / "config" / "snort.lua";
   auto logs = root / "snort_logs";
-
   fs::create_directories(logs);
 
   ofstream out(cfg);
-  if (!out)
+  if (!out) {
+    std::cerr << "Failed to open " << cfg << " for writing.\n";
     return;
+  }
 
-  out << "include 'snort_defaults.lua'\n\n-- auto-generated snort.lua\n\n";
+  out << "include 'snort_defaults.lua'\n";
   out << "wizard = default_wizard\n\n";
 
+  // HTTP
+  set<string> home_ips;
+  set<string> http_ports;
   bool need_http = false;
-  for (auto &nc : configuredInterfaces)
-    need_http |= nc.HTTP_SERVERS.value_or(false);
 
-  out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
-  if (need_http)
+  for (const auto &nc : configuredInterfaces)
+  {
+    home_ips.insert("'" + nc.IP + "'");
+    if (nc.HTTP_SERVERS.value_or(false))
+    {
+      need_http = true;
+      http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
+    }
+  }
+
+  if (need_http && !http_ports.empty())
   {
     out << "http_inspect = {\n"
            "  request_depth = -1,\n"
@@ -342,28 +352,12 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
            "  unzip = true,\n"
            "  normalize_utf = true\n"
            "}\n";
-  }
-  out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
 
-  // รวม IP และ HTTP PORTS
-  set<string> home_ips;
-  set<string> http_ports;
-  for (const auto &nc : configuredInterfaces)
-  {
-    home_ips.insert("'" + nc.IP + "'");
-    if (nc.HTTP_SERVERS.value_or(false))
-      http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
-  }
-
-  // เขียน HTTP_SERVERS และ HTTP_PORTS
-  if (need_http)
-  {
     ostringstream ip_list;
     bool first = true;
     for (const auto &ip : home_ips)
     {
-      if (!first)
-        ip_list << ", ";
+      if (!first) ip_list << ", ";
       ip_list << ip;
       first = false;
     }
@@ -373,15 +367,16 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     first = true;
     for (const auto &port : http_ports)
     {
-      if (!first)
-        port_list << " ";
+      if (!first) port_list << " ";
       port_list << port;
       first = false;
     }
     out << "HTTP_PORTS = '" << port_list.str() << "'\n\n";
   }
 
-  // HOME_NET และ EXTERNAL_NET
+  out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
+  out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+
   // HOME_NET
   if (home_ips.size() > 1)
   {
@@ -389,8 +384,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     bool first = true;
     for (auto &ip : home_ips)
     {
-      if (!first)
-        out << ", ";
+      if (!first) out << ", ";
       out << ip;
       first = false;
     }
@@ -398,7 +392,11 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
   else
   {
-    out << "HOME_NET = " << *home_ips.begin() << "\n";
+    if (!home_ips.empty()) {
+      out << "HOME_NET = " << *home_ips.begin() << "\n";
+    } else {
+      out << "HOME_NET = 'any'\n";
+    }
   }
 
   // EXTERNAL_NET
@@ -409,8 +407,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     for (auto &ip : home_ips)
     {
       string raw_ip = ip.substr(1, ip.size() - 2);
-      if (!first)
-        out << ", ";
+      if (!first) out << ", ";
       out << "'!" << raw_ip << "'";
       first = false;
     }
@@ -418,34 +415,45 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
   else
   {
-    string raw_ip = (*home_ips.begin()).substr(1, (*home_ips.begin()).size() - 2);
-    out << "EXTERNAL_NET = '!" << raw_ip << "'\n\n";
+    if (!home_ips.empty()) {
+      string raw_ip = (*home_ips.begin()).substr(1, (*home_ips.begin()).size() - 2);
+      out << "EXTERNAL_NET = '!" << raw_ip << "'\n\n";
+    } else {
+      out << "EXTERNAL_NET = 'any'\n\n";
+    }
   }
 
   // DAQ
   out << "daq_module = 'afpacket'\n";
   out << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n";
 
+  // IPS block
   out << "ips = {\n"
-         "  variables = default_variables,\n"
-         "  include     = '"
-      << (root / "rules" / "snort3-community.rules").string() << "',\n"
-                                                                 "  mode        = '"
-      << (mode ? "inline" : "tap") << "',\n"
-                                      "  enable_builtin_rules = false\n"
-                                      "}\n\n";
+      << "  include     = '" << (root / "rules" / "default.rules").string() << "',\n"
+      << "  mode        = '" << (mode ? "inline" : "tap") << "',\n"
+      << "  enable_builtin_rules = false,\n"
+      << "  variables = {\n"
+      // IP SERVER 
+      << "    nets = {\n"
+      << "      HOME_NET     = HOME_NET,\n"
+      << "      EXTERNAL_NET = EXTERNAL_NET\n"
+      << "    }\n"
+      // PORT SERVER
+      // << "    ports = {\n"
+      // << "    }\n"
+      << "  }\n"
+      << "}\n\n";
 
   // Logging
   out << "loggers = {\n"
          "  {\n"
          "    name = 'alert_json',\n"
          "    file = true,\n"
-         "    filename = '"
-      << (logs / "snort.alert").string() << "',\n"
-                                            "    limit = 100,\n"
-                                            "    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'\n"
-                                            "  }\n"
-                                            "}\n\n";
+         "    filename = '" << (logs / "snort.alert").string() << "',\n"
+         "    limit = 100,\n"
+         "    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'\n"
+         "  }\n"
+         "}\n\n";
 
   out << "pkt_logger = { file=true, limit=1000 }\n\n";
 

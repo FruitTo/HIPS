@@ -1,63 +1,53 @@
-HOME_NET = '192.168.1.121/32'
-EXTERNAL_NET = 'any'
-DNS_SERVERS = HOME_NET
-FTP_SERVERS = HOME_NET
-HTTP_SERVERS = {'192.168.1.121'}
-SMTP_SERVERS = HOME_NET
-SIP_SERVERS = HOME_NET
-SSH_SERVERS = HOME_NET
-SQL_SERVERS = HOME_NET
-TELNET_SERVERS = HOME_NET
-
-HTTP_PORTS = '8080'  -- พอร์ตที่สนใจ
-
 include 'snort_defaults.lua'
+wizard = default_wizard
 
-stream = {}; stream_tcp = {}; stream_udp = {}
-http_inspect = { request_depth=-1, response_depth=-1, unzip=true, normalize_utf=true }
-daq_module = 'afpacket'; daq_mode = 'passive'
+http_inspect = {
+  request_depth = -1,
+  response_depth = -1,
+  unzip = true,
+  normalize_utf = true
+}
+HTTP_SERVERS = { '192.168.1.121' }
+HTTP_PORTS = '8080'
 
+stream = {}
+stream_tcp = {}
+stream_udp = {}
+
+wizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }
+
+HOME_NET = '192.168.1.121'
+EXTERNAL_NET = '!192.168.1.121'
+
+daq_module = 'afpacket'
+daq_mode = 'passive'
 ips = {
-  mode = 'tap',
+  include     = '/home/fruitto/Project/HIPS/rules/default.rules',
+  mode        = 'tap',
   enable_builtin_rules = false,
   variables = {
     nets = {
-      HOME_NET       = HOME_NET,
-      EXTERNAL_NET   = EXTERNAL_NET,
-      DNS_SERVERS    = DNS_SERVERS,
-      FTP_SERVERS    = FTP_SERVERS,
-      HTTP_SERVERS   = HTTP_SERVERS,
-      SIP_SERVERS    = SIP_SERVERS,
-      SMTP_SERVERS   = SMTP_SERVERS,
-      SQL_SERVERS    = SQL_SERVERS,
-      SSH_SERVERS    = SSH_SERVERS,
-      TELNET_SERVERS = TELNET_SERVERS
-    },
-    ports = {
-      FTP_PORTS       = FTP_PORTS,
-      HTTP_PORTS      = HTTP_PORTS,
-      MAIL_PORTS      = MAIL_PORTS,
-      ORACLE_PORTS    = ORACLE_PORTS,
-      SIP_PORTS       = SIP_PORTS,
-      SSH_PORTS       = SSH_PORTS,
-      FILE_DATA_PORTS = FILE_DATA_PORTS
+      HOME_NET     = HOME_NET,
+      EXTERNAL_NET = EXTERNAL_NET
     }
-  },
-  include = '/home/fruitto/Project/HIPS/rules/snort3-community.rules'
+  }
 }
 
 loggers = {
-  { name = 'alert_json', file=true,
+  {
+    name = 'alert_json',
+    file = true,
     filename = '/home/fruitto/Project/HIPS/snort_logs/snort.alert',
-    limit=100,
-    fields='timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class' }
+    limit = 100,
+    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'
+  }
 }
-pkt_logger = { file=true, limit=100 }
+
+pkt_logger = { file=true, limit=1000 }
 
 binder = {
   { when={ proto='tcp' }, use={ type='stream_tcp' } },
   { when={ proto='udp' }, use={ type='stream_udp' } },
   { when={ service='http' }, use={ type='http_inspect' } },
   { use={ type='wizard' } }
-}
-wizard = default_wizard
+};
