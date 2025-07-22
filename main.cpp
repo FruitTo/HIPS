@@ -38,7 +38,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 void sniff(NetworkConfig &conf);
 string join(const vector<string> &list, const string &sep);
 
-auto rules = SnortRuleParser::parseRulesFromFile("./rules/default.rules");
+// auto rules = SnortRuleParser::parseRulesFromFile("./rules/default.rules");
 
 int main()
 {
@@ -46,7 +46,6 @@ int main()
   vector<NetworkConfig> configuredInterfaces;
   thread_pool pool(interfaceName.size());
   vector<future<void>> task;
-  cout << "Rule:" << rules["tcp"].size() << endl;
 
   // Select Mode.
   bool mode;
@@ -109,9 +108,14 @@ int main()
   {
     vector<char *> argv;
 
+    argv.push_back(strdup("sudo"));
     argv.push_back(strdup("snort"));
+
     argv.push_back(strdup("--snaplen"));
     argv.push_back(strdup("65535"));
+
+    argv.push_back(strdup("--daq-dir"));
+    argv.push_back(strdup("/usr/local/lib/daq"));
     argv.push_back(strdup("--daq"));
     argv.push_back(strdup("afpacket"));
     argv.push_back(strdup("--daq-mode"));
@@ -144,10 +148,16 @@ int main()
     }
     cout << endl;
 
-    execvp("snort", argv.data());
+    execvp("sudo", argv.data());
     perror("execvp failed");
     _exit(1);
   }
+  // User for wait snort
+  //   else if (pid > 0)
+  // {
+  //   int status;
+  //   waitpid(pid, &status, 0);
+  // }
 
   for (NetworkConfig &conf : configuredInterfaces)
   {
