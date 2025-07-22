@@ -88,15 +88,14 @@ int main()
     askService("SSH", conf.SSH_SERVERS, conf.SSH_PORTS);
     askService("FTP", conf.FTP_SERVERS, conf.FTP_PORTS);
     askService("Oracle", conf.SQL_SERVERS, conf.ORACLE_PORTS);
-    askService("FileData", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
-    askService("SMTP", conf.SMTP_SERVERS, conf.SMTP_PORTS);
-    askService("TELNET", conf.TELNET_SERVERS, conf.TELNET_PORTS);
+    askService("TELNET", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
+    askService("SIP", conf.SIP_SERVERS, conf.SIP_PORTS);
 
-    // SIP
-    cout << "SIP Service? [y/n]: ";
+    // SMTP
+    cout << "SMTP Service? [y/n]: ";
     cin >> yesno;
     cin.ignore();
-    conf.SIP_SERVERS = (yesno == 'y' || yesno == 'Y');
+    conf.SMTP_SERVERS = (yesno == 'y' || yesno == 'Y');
 
     configuredInterfaces.push_back(conf);
   }
@@ -153,7 +152,7 @@ int main()
   for (NetworkConfig &conf : configuredInterfaces)
   {
     task.push_back(pool.submit_task([&conf]()
-                                    { sniff(conf); }));
+      { sniff(conf); }));
   }
 
   for (auto &t : task)
@@ -187,7 +186,7 @@ void sniff(NetworkConfig &conf)
   config.set_promisc_mode(true);
   Sniffer sniffer(conf.NAME, config);
   sniffer.sniff_loop([&](Packet &pkt)
-                     {
+      {
         total_packets++;
 
         // Check Flow Time Expire
@@ -235,8 +234,8 @@ void sniff(NetworkConfig &conf)
             
             // HTTP Detection
             if (tcp.sport() == 80 || tcp.dport() == 80 || 
-                tcp.sport() == 8080 || tcp.dport() == 8080 ||
-                tcp.sport() == 443 || tcp.dport() == 443)  {
+ tcp.sport() == 8080 || tcp.dport() == 8080 ||
+ tcp.sport() == 443 || tcp.dport() == 443)  {
               packet.protocol = "http";
               packet.http.emplace();
               HTTPFilter(&packet, tcp);
@@ -250,7 +249,7 @@ void sniff(NetworkConfig &conf)
             
             // FTP Detection
             if (tcp.sport() == 21 || tcp.dport() == 21 || 
-                tcp.sport() == 2021 || tcp.dport() == 2021) {
+ tcp.sport() == 2021 || tcp.dport() == 2021) {
               packet.protocol = "ftp";
               packet.ftp.emplace();
               FTPFilter(&packet, tcp);
@@ -258,8 +257,8 @@ void sniff(NetworkConfig &conf)
             
             // SMTP Detection
             if (tcp.sport() == 25 || tcp.dport() == 25 ||
-                tcp.sport() == 587 || tcp.dport() == 587 ||
-                tcp.sport() == 465 || tcp.dport() == 465) {
+ tcp.sport() == 587 || tcp.dport() == 587 ||
+ tcp.sport() == 465 || tcp.dport() == 465) {
               packet.protocol = "smtp";
               packet.smtp.emplace();
               SMTPFilter(&packet, tcp);
@@ -345,11 +344,29 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   out << "include 'snort_defaults.lua'\n";
   out << "wizard = default_wizard\n\n";
 
-  // HTTP
   set<string> home_ips;
+
   set<string> http_ports;
   bool need_http = false;
 
+  set<string> file_ports;
+  bool need_telnet = false;
+
+  set<string> ftp_ports;
+  bool need_ftp = false;
+
+  set<string> oracle_ports;
+  bool need_sql = false;
+
+  set<string> sip_ports;
+  bool need_sip = false;
+
+  bool need_smtp = false;
+
+  set<string> ssh_ports;
+  bool need_ssh = false;
+
+  // Check need protocol
   for (const auto &nc : configuredInterfaces)
   {
     home_ips.insert("'" + nc.IP + "'");
@@ -358,8 +375,44 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
       need_http = true;
       http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
     }
+
+    if (nc.TELNET_SERVERS.value_or(false))
+    {
+      need_telnet = true;
+      file_ports.insert(nc.FILE_DATA_PORTS.begin(), nc.FILE_DATA_PORTS.end());
+    }
+
+    if (nc.FTP_SERVERS.value_or(false))
+    {
+      need_ftp = true;
+      ftp_ports.insert(nc.FTP_PORTS.begin(), nc.FTP_PORTS.end());
+    }
+
+    if (nc.SQL_SERVERS.value_or(false))
+    {
+      need_sql = true;
+      oracle_ports.insert(nc.ORACLE_PORTS.begin(), nc.ORACLE_PORTS.end());
+    }
+
+    if (nc.SIP_SERVERS.value_or(false))
+    {
+      need_sip = true;
+      sip_ports.insert(nc.SIP_PORTS.begin(), nc.SIP_PORTS.end());
+    }
+
+    if (nc.SMTP_SERVERS.value_or(false))
+    {
+      need_smtp = true;
+    }
+
+    if (nc.SSH_SERVERS.value_or(false))
+    {
+      need_ssh = true;
+      ssh_ports.insert(nc.SSH_PORTS.begin(), nc.SSH_PORTS.end());
+    }
   }
 
+  // HTTP
   if (need_http && !http_ports.empty())
   {
     out << "http_inspect = {\n"
@@ -367,7 +420,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
            "  response_depth = -1,\n"
            "  unzip = true,\n"
            "  normalize_utf = true\n"
-           "}\n";
+           "}\n\n";
 
     ostringstream ip_list;
     bool first = true;
@@ -389,11 +442,83 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
       port_list << port;
       first = false;
     }
-    out << "HTTP_PORTS = '" << port_list.str() << "'\n\n";
+    out << "HTTP_PORTS = '" << port_list.str() << "'\n";
   }
 
-  out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
-  out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+  // Telnet 
+  if (need_telnet && !file_ports.empty())
+  {
+    ostringstream port_list;
+    bool first = true;
+    for (const auto &port : file_ports)
+    {
+      if (!first)
+        port_list << " ";
+      port_list << port;
+      first = false;
+    }
+    out << "FILE_DATA_PORTS = '" << port_list.str() << "'\n";
+  }
+
+  // FTP
+  if (need_ftp && !ftp_ports.empty())
+  {
+    ostringstream port_list;
+    bool first = true;
+    for (const auto &port : ftp_ports)
+    {
+      if (!first)
+        port_list << " ";
+      port_list << port;
+      first = false;
+    }
+    out << "FTP_PORTS = '" << port_list.str() << "'\n";
+  }
+
+  // SQL
+  if (need_sql && !oracle_ports.empty())
+  {
+    ostringstream port_list;
+    bool first = true;
+    for (const auto &port : oracle_ports)
+    {
+      if (!first)
+        port_list << " ";
+      port_list << port;
+      first = false;
+    }
+    out << "ORACLE_PORTS = '" << port_list.str() << "'\n";
+  }
+
+  // SIP
+  if (need_sip && !sip_ports.empty())
+  {
+    ostringstream port_list;
+    bool first = true;
+    for (const auto &port : sip_ports)
+    {
+      if (!first)
+        port_list << " ";
+      port_list << port;
+      first = false;
+    }
+    out << "SIP_PORTS = '" << port_list.str() << "'\n";
+  }
+
+  // SSH
+  if (need_ssh && !ssh_ports.empty())
+  {
+    ostringstream port_list;
+    bool first = true;
+    for (const auto &port : ssh_ports)
+    {
+      if (!first)
+        port_list << " ";
+      port_list << port;
+      first = false;
+    }
+    out << "SSH_PORTS = '" << port_list.str() << "'\n";
+  }
 
   // HOME_NET
   if (home_ips.size() > 1)
@@ -449,25 +574,99 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     }
   }
 
+  out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
+  out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+
   // DAQ
   out << "daq_module = 'afpacket'\n";
   out << "daq_mode = '" << (mode ? "inline" : "passive") << "'\n";
 
   // IPS block
-  out << "ips = {\n"
-      << "  include     = '" << (root / "rules" / "default.rules").string() << "',\n"
-      << "  mode        = '" << (mode ? "inline" : "tap") << "',\n"
+  out << "ips = {\n";
+  out << "  rules = [[\n";
+  out << "    include " << (root / "rules" / "default.rules").string() << "\n";
+  if(need_http){
+    out <<  "    include " << (root / "rules" / "http.rules").string() << "\n";
+  }
+  if(need_telnet){
+    out <<  "    include " << (root / "rules" / "telnet.rules").string() << "\n";
+  }
+  if(need_sql){
+    out <<  "    include " << (root / "rules" / "sql.rules").string() << "\n";
+  }
+  if(need_sip){
+    out <<  "    include " << (root / "rules" / "sip.rules").string() << "\n";
+  }
+  if(need_smtp){
+    out <<  "    include " << (root / "rules" / "smtp.rules").string() << "\n";
+  }
+  if(need_ssh){
+    out <<  "    include " << (root / "rules" / "ssh.rules").string() << "\n";
+  }
+  if(need_ftp){
+    out <<  "    include " << (root / "rules" / "ftp.rules").string() << "\n";
+  }
+  out << "  ]],\n";
+  out << "  mode = '" << (mode ? "inline" : "tap") << "',\n"
       << "  enable_builtin_rules = false,\n"
-      << "  variables = {\n"
-      // IP SERVER
-      << "    nets = {\n"
+      << "  variables = {\n";
+  // IP SERVER
+  out << "    nets = {\n"
       << "      HOME_NET     = HOME_NET,\n"
-      << "      EXTERNAL_NET = EXTERNAL_NET\n"
-      << "    }\n"
-      // PORT SERVER
-      // << "    ports = {\n"
-      // << "    }\n"
-      << "  }\n"
+      << "      EXTERNAL_NET = EXTERNAL_NET,\n";
+  if (need_http)
+  {
+    out << "      HTTP_SERVERS = HOME_NET,\n";
+  }
+  if (need_telnet)
+  {
+    out << "      TELNET_SERVERS = HOME_NET,\n";
+  }
+  if (need_sql)
+  {
+    out << "      SQL_SERVERS = HOME_NET,\n";
+  }
+  if (need_sip)
+  {
+    out << "      SIP_SERVERS = HOME_NET,\n";
+  }
+  if (need_smtp)
+  {
+    out << "      SMTP_SERVERS = HOME_NET,\n";
+  }
+  out << "    },\n";
+
+  // PORT SERVER
+  if (need_http || need_telnet || need_ftp || need_sql || need_sip)
+  {
+    out << "    ports = {\n";
+    if (need_http)
+    {
+      out << "      HTTP_PORTS = HTTP_PORTS,\n";
+    }
+    if (need_telnet)
+    {
+      out << "      FILE_DATA_PORTS = FILE_DATA_PORTS,\n";
+    }
+    if (need_ftp)
+    {
+      out << "      FTP_PORTS = FTP_PORTS,\n";
+    }
+    if (need_sql)
+    {
+      out << "      ORACLE_PORTS = ORACLE_PORTS,\n";
+    }
+    if (need_sip)
+    {
+      out << "      SIP_PORTS = SIP_PORTS,\n";
+    }
+    if (need_ssh)
+    {
+      out << "      SSH_PORTS = SSH_PORTS,\n";
+    }
+    out << "    },\n";
+  }
+  out << "  }\n"
       << "}\n\n";
 
   // Logging

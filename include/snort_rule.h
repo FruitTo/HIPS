@@ -18,11 +18,10 @@ struct NetworkConfig {
    std::vector<std::string> HTTP_PORTS;
    std::vector<std::string> SSH_PORTS;
    std::vector<std::string> FTP_PORTS;
+   std::vector<std::string> SIP_PORTS;
 
    std::vector<std::string> ORACLE_PORTS;
    std::vector<std::string> FILE_DATA_PORTS;
-   std::vector<std::string> SMTP_PORTS;
-   std::vector<std::string> TELNET_PORTS;
 
    std::optional<bool> HTTP_SERVERS = false;
    std::optional<bool> SSH_SERVERS = false;
