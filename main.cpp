@@ -131,10 +131,10 @@ int main()
 
     argv.push_back(strdup("-c"));
     argv.push_back(strdup("./config/snort.lua"));
+    argv.push_back(strdup("-A"));
+    argv.push_back(strdup("alert_json"));
     argv.push_back(strdup("-l"));
     argv.push_back(strdup("./snort_logs"));
-    argv.push_back(strdup("-A"));
-    argv.push_back(strdup("fast"));
     argv.push_back(nullptr);
 
     cout << "[Snort command] ";
@@ -302,9 +302,6 @@ void sniff(NetworkConfig &conf)
 
           // Detection
           if(headerDetection(packet, rules, conf)){
-            cout << "Forwarded" << endl;
-            // auto buf = pkt.pdu()->serialize();
-            // write(write_fd, buf.data(), buf.size());
           }
         }
         return true; });
@@ -329,6 +326,7 @@ string join(const vector<string> &list, const string &sep)
   }
   return out;
 }
+
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 {
   namespace fs = filesystem;
@@ -473,13 +471,10 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
       << "}\n\n";
 
   // Logging
-  out << "loggers = {\n"
-         "  {\n"
-         "    name = 'alert_json',\n"
+  out << "alert_json = {\n"
+         "    fields = 'seconds timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class',\n"
          "    file = true,\n"
          "    limit = 100,\n"
-         "    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'\n"
-         "  }\n"
          "}\n\n";
 
   out << "pkt_logger = { file=true, limit=1000 }\n\n";

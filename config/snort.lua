@@ -24,14 +24,10 @@ ips = {
   }
 }
 
-loggers = {
-  {
-    name = 'alert_json',
+alert_json = {
+    fields = 'seconds timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class',
     file = true,
-    filename = '/home/fruitto/Project/HIPS/snort_logs/snort.alert',
     limit = 100,
-    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'
-  }
 }
 
 pkt_logger = { file=true, limit=1000 }
