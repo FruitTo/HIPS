@@ -1,15 +1,6 @@
 include 'snort_defaults.lua'
 wizard = default_wizard
 
-http_inspect = {
-  request_depth = -1,
-  response_depth = -1,
-  unzip = true,
-  normalize_utf = true
-}
-HTTP_SERVERS = { '192.168.1.121' }
-HTTP_PORTS = '8080'
-
 stream = {}
 stream_tcp = {}
 stream_udp = {}
@@ -48,6 +39,5 @@ pkt_logger = { file=true, limit=1000 }
 binder = {
   { when={ proto='tcp' }, use={ type='stream_tcp' } },
   { when={ proto='udp' }, use={ type='stream_udp' } },
-  { when={ service='http' }, use={ type='http_inspect' } },
   { use={ type='wizard' } }
 };

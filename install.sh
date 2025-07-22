@@ -10,8 +10,7 @@ sudo apt install -y \
   libhwloc-dev liblzma-dev libunwind-dev cpputest \
   libsqlite3-dev uuid-dev libcmocka-dev \
   libnetfilter-queue-dev libmnl-dev autotools-dev libfl-dev \
-  libgoogle-perftools-dev
-
+  libgoogle-perftools-dev libtins-dev libxxhash-dev
 
 function ensure_repo() {
   local url=$1 localdir=$2
@@ -56,8 +55,8 @@ sudo ldconfig
 echo "[*] ตรวจสอบเวอร์ชัน snort"
 snort -V
 
-# sudo ethtool -K enp2s0 tx off rx off
+sudo ethtool -K enp2s0 tx off rx off
 # sudo ethtool -K enp2s0 tx on rx on
 
-# sudo ip link set enp2s0 promisc on
+sudo ip link set enp2s0 promisc on
 # sudo ip link set enp2s0 promisc off

@@ -104,29 +104,48 @@ int main()
   // Create Config File
   config(mode, configuredInterfaces);
 
-  // Create Virtual Interface
-  int ret = system("sudo ./virtual_interface.sh");
-  if (ret != 0)
-  {
-    cerr << "Error :" << ret << "\n";
-    return 1;
-  }
-
   // Create Snort Process
   pid_t pid = fork();
   if (pid == 0)
   {
-    char const *argv[] = {
-        "ip", "netns", "exec", "ns2",
-        "./snort.sh",
-        "--snaplen", "65535",
-        "-c", "./config/snort.lua",
-        "-i", "veth1",
-        "-l", "./snort_logs",
-        "-A", "fast",
-        "-v",
-        nullptr};
-    execvp(argv[0], const_cast<char *const *>(argv));
+    vector<char *> argv;
+
+    argv.push_back(strdup("snort"));
+    argv.push_back(strdup("--snaplen"));
+    argv.push_back(strdup("65535"));
+    argv.push_back(strdup("--daq"));
+    argv.push_back(strdup("afpacket"));
+    argv.push_back(strdup("--daq-mode"));
+    argv.push_back(strdup("passive"));
+
+    // Interface
+    for (const auto &ifn : interfaceName)
+    {
+      argv.push_back(strdup("-i"));
+      argv.push_back(strdup(ifn.c_str()));
+    }
+
+    // Thread
+    argv.push_back(strdup("--max-packet-threads"));
+    argv.push_back(strdup(to_string(interfaceName.size()).c_str()));
+
+    argv.push_back(strdup("-c"));
+    argv.push_back(strdup("./config/snort.lua"));
+    argv.push_back(strdup("-l"));
+    argv.push_back(strdup("./snort_logs"));
+    argv.push_back(strdup("-A"));
+    argv.push_back(strdup("fast"));
+    argv.push_back(nullptr);
+
+    cout << "[Snort command] ";
+    for (char *arg : argv)
+    {
+      if (arg != nullptr)
+        cout << arg << " ";
+    }
+    cout << endl;
+
+    execvp("snort", argv.data());
     perror("execvp failed");
     _exit(1);
   }
@@ -147,7 +166,6 @@ int main()
 
 void sniff(NetworkConfig &conf)
 {
-  PacketSender sender("veth0");
 
   // Initial Flow Variable
   static mutex mtx;
@@ -285,7 +303,6 @@ void sniff(NetworkConfig &conf)
           // Detection
           if(headerDetection(packet, rules, conf)){
             cout << "Forwarded" << endl;
-            sender.send(*pdu);
             // auto buf = pkt.pdu()->serialize();
             // write(write_fd, buf.data(), buf.size());
           }
@@ -321,8 +338,9 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   fs::create_directories(logs);
 
   ofstream out(cfg);
-  if (!out) {
-    std::cerr << "Failed to open " << cfg << " for writing.\n";
+  if (!out)
+  {
+    cerr << "Failed to open " << cfg << " for writing.\n";
     return;
   }
 
@@ -357,7 +375,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     bool first = true;
     for (const auto &ip : home_ips)
     {
-      if (!first) ip_list << ", ";
+      if (!first)
+        ip_list << ", ";
       ip_list << ip;
       first = false;
     }
@@ -367,7 +386,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     first = true;
     for (const auto &port : http_ports)
     {
-      if (!first) port_list << " ";
+      if (!first)
+        port_list << " ";
       port_list << port;
       first = false;
     }
@@ -384,7 +404,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     bool first = true;
     for (auto &ip : home_ips)
     {
-      if (!first) out << ", ";
+      if (!first)
+        out << ", ";
       out << ip;
       first = false;
     }
@@ -392,9 +413,12 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
   else
   {
-    if (!home_ips.empty()) {
+    if (!home_ips.empty())
+    {
       out << "HOME_NET = " << *home_ips.begin() << "\n";
-    } else {
+    }
+    else
+    {
       out << "HOME_NET = 'any'\n";
     }
   }
@@ -407,7 +431,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     for (auto &ip : home_ips)
     {
       string raw_ip = ip.substr(1, ip.size() - 2);
-      if (!first) out << ", ";
+      if (!first)
+        out << ", ";
       out << "'!" << raw_ip << "'";
       first = false;
     }
@@ -415,10 +440,13 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
   else
   {
-    if (!home_ips.empty()) {
+    if (!home_ips.empty())
+    {
       string raw_ip = (*home_ips.begin()).substr(1, (*home_ips.begin()).size() - 2);
       out << "EXTERNAL_NET = '!" << raw_ip << "'\n\n";
-    } else {
+    }
+    else
+    {
       out << "EXTERNAL_NET = 'any'\n\n";
     }
   }
@@ -433,7 +461,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
       << "  mode        = '" << (mode ? "inline" : "tap") << "',\n"
       << "  enable_builtin_rules = false,\n"
       << "  variables = {\n"
-      // IP SERVER 
+      // IP SERVER
       << "    nets = {\n"
       << "      HOME_NET     = HOME_NET,\n"
       << "      EXTERNAL_NET = EXTERNAL_NET\n"
@@ -449,7 +477,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
          "  {\n"
          "    name = 'alert_json',\n"
          "    file = true,\n"
-         "    filename = '" << (logs / "snort.alert").string() << "',\n"
          "    limit = 100,\n"
          "    fields = 'timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class'\n"
          "  }\n"
