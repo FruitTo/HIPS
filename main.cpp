@@ -4,14 +4,9 @@
 #include "./include/filter.h"
 #include "./include/flow_manager.h"
 #include "./include/packet.h"
-#include "./include/snort_rule.h"
-#include "./include/snort_rule_parser.h"
-#include "./include/header_detection.h"
 #include "./include/tins/tins.h"
 
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <fstream>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -23,8 +18,6 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <thread>
 
 using namespace std;
@@ -37,8 +30,6 @@ void parsePorts(const string &input, vector<string> &target);
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 void sniff(NetworkConfig &conf);
 string join(const vector<string> &list, const string &sep);
-
-// auto rules = SnortRuleParser::parseRulesFromFile("./rules/default.rules");
 
 int main()
 {
@@ -310,8 +301,6 @@ void sniff(NetworkConfig &conf)
           }
 
           // Detection
-          if(headerDetection(packet, rules, conf)){
-          }
         }
         return true; });
 }

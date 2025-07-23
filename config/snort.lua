@@ -1,15 +1,6 @@
 include 'snort_defaults.lua'
 wizard = default_wizard
 
-http_inspect = {
-  request_depth = -1,
-  response_depth = -1,
-  unzip = true,
-  normalize_utf = true
-}
-
-HTTP_SERVERS = { '192.168.1.121' }
-HTTP_PORTS = '8080'
 HOME_NET = '192.168.1.121'
 EXTERNAL_NET = '!192.168.1.121'
 
@@ -24,7 +15,6 @@ daq_mode = 'passive'
 ips = {
   rules = [[
     include /home/fruitto/Project/HIPS/rules/default.rules
-    include /home/fruitto/Project/HIPS/rules/http.rules
   ]],
   mode = 'tap',
   enable_builtin_rules = false,
@@ -32,10 +22,6 @@ ips = {
     nets = {
       HOME_NET     = HOME_NET,
       EXTERNAL_NET = EXTERNAL_NET,
-      HTTP_SERVERS = HOME_NET,
-    },
-    ports = {
-      HTTP_PORTS = HTTP_PORTS,
     },
   }
 }
@@ -51,6 +37,5 @@ pkt_logger = { file=true, limit=1000 }
 binder = {
   { when={ proto='tcp' }, use={ type='stream_tcp' } },
   { when={ proto='udp' }, use={ type='stream_udp' } },
-  { when={ service='http' }, use={ type='http_inspect' } },
   { use={ type='wizard' } }
 };

@@ -4,7 +4,6 @@
 #include "xxhash.h"
 #include "flow.h"
 #include "packet.h"
-#include "snort_rule.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
