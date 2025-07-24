@@ -1,7 +1,7 @@
 #ifndef DEVICE_H
 #define DEVICE_H
 
-#include "./snort_rule.h"
+#include "packet.h"
 #include <vector>
 #include <string>
 #include <optional>
@@ -36,35 +36,27 @@ std::vector<NetworkConfig> getDevices()
         devices.push_back(cfg);
     };
 
-    // รายละเอียดเครื่องจาก Table 1 (ICISSP 2018)
-    // Windows Server 2016 (DNS/DC)
     addDevice("WinServer2016_DC_DNS", "192.168.10.3",
               {}, {"22"}, {"21"}, {}, false, true, true);
-    // Ubuntu 16 Web Server (.50) — HTTP/HTTPS, SSH, FTP
     addDevice("Ubuntu16_WebServer", "192.168.10.50",
               {"80", "443"}, {"22"}, {"21"}, {}, true, true, true);
-    // Ubuntu 12 (.51) – HTTP/HTTPS, SSH, FTP, Heartbleed port 444
     addDevice("Ubuntu12", "192.168.10.51",
               {"80", "443"}, {"22"}, {"21"}, {}, true, true, true);
-    // Ubuntu 14 (32,64-bit)
     addDevice("Ubuntu14_32bit", "192.168.10.19",
               {"80", "443"}, {"22"}, {"21"});
     addDevice("Ubuntu14_64bit", "192.168.10.17",
               {"80", "443"}, {"22"}, {"21"});
-    // Ubuntu 16 (32,64-bit)
     addDevice("Ubuntu16_32bit", "192.168.10.16",
               {"80", "443"}, {"22"}, {"21"});
     addDevice("Ubuntu16_64bit", "192.168.10.12",
               {"80", "443"}, {"22"}, {"21"});
 
-    // Windows Clients — HTTP/HTTPS
     addDevice("Win7Pro_64bit", "192.168.10.9", {"80", "443"});
     addDevice("Win8_1_64bit", "192.168.10.5", {"80", "443"});
     addDevice("WinVista_64bit", "192.168.10.8", {"80", "443"});
     addDevice("Win10_pro_32bit", "192.168.10.14", {"80", "443"});
     addDevice("Win10_pro_64bit", "192.168.10.15", {"80", "443"});
 
-    // macOS client — HTTP/HTTPS
     addDevice("Mac_OSX", "192.168.10.25", {"80", "443"});
 
     return devices;

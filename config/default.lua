@@ -1,7 +1,8 @@
-HOME_NET = '192.168.1.121'
+HOME_NET = 'any'
 EXTERNAL_NET = 'any'
 
 include 'snort_defaults.lua'
+
 stream = { }
 stream_ip = { }
 stream_icmp = { }
@@ -14,7 +15,7 @@ arp_spoof = { }
 back_orifice = { }
 dns = { }
 imap = { }
-netflow = { }
+netflow = {}
 normalizer = { }
 pop = { }
 rpc_decode = { }
@@ -47,11 +48,13 @@ ftp_data = { }
 http_inspect = { }
 http2_inspect = { }
 
+
 js_norm = default_js_norm
 
 wizard = default_wizard
 
-binder = {
+binder =
+{
     { when = { proto = 'udp', ports = '53', role='server' },  use = { type = 'dns' } },
     { when = { proto = 'tcp', ports = '53', role='server' },  use = { type = 'dns' } },
     { when = { proto = 'tcp', ports = '111', role='server' }, use = { type = 'rpc_decode' } },
@@ -95,24 +98,11 @@ binder = {
 
 references = default_references
 classifications = default_classifications
-daq_module = 'afpacket'
-daq_mode = 'passive'
-ips = {
-  rules = [[
-    include /home/fruitto/Project/HIPS/rules/default.rules
-  ]],
-  mode = 'tap',
-  enable_builtin_rules = false,
-  variables = default_variables,
-}
 
-alert_json = {
-    fields = 'seconds timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class',
-    file = true,
-    limit = 100,
+ips =
+{
+    variables = default_variables
 }
-
-pkt_logger = { file=true, limit=1000 }
 
 if ( tweaks ~= nil ) then
     include(tweaks .. '.lua')

@@ -15,7 +15,7 @@ sudo apt install -y \
 function ensure_repo() {
   local url=$1 localdir=$2
   if [ -d "$localdir/.git" ]; then
-    echo "[*] $localdir มีอยู่แล้ว → ดึงอัปเดต (git pull)"
+    echo "[*] $localdir already have → git pull"
     git -C "$localdir" pull
   else
     echo "[*] Clone $url → $localdir"
@@ -52,11 +52,10 @@ make -j4 && sudo make install
 
 sudo ldconfig
 
-echo "[*] ตรวจสอบเวอร์ชัน snort"
 snort -V
 
-sudo ethtool -K enp2s0 tx off rx off
+# sudo ethtool -K enp2s0 tx off rx off
 # sudo ethtool -K enp2s0 tx on rx on
 
-sudo ip link set enp2s0 promisc on
+# sudo ip link set enp2s0 promisc on
 # sudo ip link set enp2s0 promisc off

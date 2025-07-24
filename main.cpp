@@ -26,10 +26,10 @@ using namespace BS;
 using namespace chrono;
 namespace fs = filesystem;
 
-void parsePorts(const string &input, vector<string> &target);
-void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 void sniff(NetworkConfig &conf);
+void parsePorts(const string &input, vector<string> &target);
 string join(const vector<string> &list, const string &sep);
+void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 
 int main()
 {
@@ -153,7 +153,7 @@ int main()
   for (NetworkConfig &conf : configuredInterfaces)
   {
     task.push_back(pool.submit_task([&conf]()
-      { sniff(conf); }));
+                                    { sniff(conf); }));
   }
 
   for (auto &t : task)
@@ -166,7 +166,6 @@ int main()
 
 void sniff(NetworkConfig &conf)
 {
-
   // Initial Flow Variable
   static mutex mtx;
   unordered_map<string, FlowEntry> flow_table;
@@ -187,7 +186,7 @@ void sniff(NetworkConfig &conf)
   config.set_promisc_mode(true);
   Sniffer sniffer(conf.NAME, config);
   sniffer.sniff_loop([&](Packet &pkt)
-      {
+                     {
         total_packets++;
 
         // Check Flow Time Expire
@@ -299,8 +298,6 @@ void sniff(NetworkConfig &conf)
           if (flow_table.size() > flows_before) {
             total_flows++;
           }
-
-          // Detection
         }
         return true; });
 }
@@ -339,9 +336,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     cerr << "Failed to open " << cfg << " for writing.\n";
     return;
   }
-
-  out << "include 'snort_defaults.lua'\n";
-  out << "wizard = default_wizard\n\n";
 
   set<string> home_ips;
 
@@ -444,7 +438,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     out << "HTTP_PORTS = '" << port_list.str() << "'\n";
   }
 
-  // Telnet 
+  // Telnet
   if (need_telnet && !file_ports.empty())
   {
     ostringstream port_list;
@@ -546,35 +540,125 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
 
   // EXTERNAL_NET
-  if (home_ips.size() > 1)
-  {
-    out << "EXTERNAL_NET = { ";
-    bool first = true;
-    for (auto &ip : home_ips)
-    {
-      string raw_ip = ip.substr(1, ip.size() - 2);
-      if (!first)
-        out << ", ";
-      out << "'!" << raw_ip << "'";
-      first = false;
-    }
-    out << " }\n\n";
-  }
-  else
-  {
-    if (!home_ips.empty())
-    {
-      string raw_ip = (*home_ips.begin()).substr(1, (*home_ips.begin()).size() - 2);
-      out << "EXTERNAL_NET = '!" << raw_ip << "'\n\n";
-    }
-    else
-    {
-      out << "EXTERNAL_NET = 'any'\n\n";
-    }
-  }
+  out << "EXTERNAL_NET = 'any'\n\n";
+  // if (home_ips.size() > 1)
+  // {
+  //   out << "EXTERNAL_NET = { ";
+  //   bool first = true;
+  //   for (auto &ip : home_ips)
+  //   {
+  //     string raw_ip = ip.substr(1, ip.size() - 2);
+  //     if (!first)
+  //       out << ", ";
+  //     out << "'!" << raw_ip << "'";
+  //     first = false;
+  //   }
+  //   out << " }\n\n";
+  // }
+  // else
+  // {
+  //   if (!home_ips.empty())
+  //   {
+  //     string raw_ip = (*home_ips.begin()).substr(1, (*home_ips.begin()).size() - 2);
+  //     out << "EXTERNAL_NET = '!" << raw_ip << "'\n\n";
+  //   }
+  //   else
+  //   {
+  //     out << "EXTERNAL_NET = 'any'\n\n";
+  //   }
+  // }
 
-  out << "stream = {}\nstream_tcp = {}\nstream_udp = {}\n";
-  out << "\nwizard = { curses = {'dce_tcp','dce_udp','dce_smb','sslv2','mms','s7commplus'} }\n\n";
+  out << "include 'snort_defaults.lua'\n";
+
+  out << "stream = { }\n"
+      << "stream_ip = { }\n"
+      << "stream_icmp = { }\n"
+      << "stream_tcp = { }\n"
+      << "stream_udp = { }\n"
+      << "stream_user = { }\n"
+      << "stream_file = { }\n\n"
+
+      << "arp_spoof = { }\n"
+      << "back_orifice = { }\n"
+      << "dns = { }\n"
+      << "imap = { }\n"
+      << "netflow = { }\n"
+      << "normalizer = { }\n"
+      << "pop = { }\n"
+      << "rpc_decode = { }\n"
+      << "sip = { }\n"
+      << "ssh = { }\n"
+      << "ssl = { }\n"
+      << "telnet = { }\n\n"
+
+      << "cip = { }\n"
+      << "dnp3 = { }\n"
+      << "iec104 = { }\n"
+      << "mms = { }\n"
+      << "modbus = { }\n"
+      << "s7commplus = { }\n\n"
+
+      << "dce_smb = { }\n"
+      << "dce_tcp = { }\n"
+      << "dce_udp = { }\n"
+      << "dce_http_proxy = { }\n"
+      << "dce_http_server = { }\n\n"
+
+      << "gtp_inspect = default_gtp\n"
+      << "port_scan = default_med_port_scan\n"
+      << "smtp = default_smtp\n\n"
+
+      << "ftp_server = default_ftp_server\n"
+      << "ftp_client = { }\n"
+      << "ftp_data = { }\n\n"
+
+      << "http_inspect = { }\n"
+      << "http2_inspect = { }\n\n"
+
+      << "js_norm = default_js_norm\n\n"
+
+      << "wizard = default_wizard\n\n"
+
+      << "binder = {\n"
+      << "    { when = { proto = 'udp', ports = '53', role='server' },  use = { type = 'dns' } },\n"
+      << "    { when = { proto = 'tcp', ports = '53', role='server' },  use = { type = 'dns' } },\n"
+      << "    { when = { proto = 'tcp', ports = '111', role='server' }, use = { type = 'rpc_decode' } },\n"
+      << "    { when = { proto = 'tcp', ports = '502', role='server' }, use = { type = 'modbus' } },\n"
+      << "    { when = { proto = 'tcp', ports = '2123 2152 3386', role='server' }, use = { type = 'gtp_inspect' } },\n"
+      << "    { when = { proto = 'tcp', ports = '2404', role='server' }, use = { type = 'iec104' } },\n"
+      << "    { when = { proto = 'udp', ports = '2222', role = 'server' }, use = { type = 'cip' } },\n"
+      << "    { when = { proto = 'tcp', ports = '44818', role = 'server' }, use = { type = 'cip' } },\n\n"
+      << "    { when = { proto = 'tcp', service = 'dcerpc' },  use = { type = 'dce_tcp' } },\n"
+      << "    { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },\n"
+      << "    { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },\n\n"
+      << "    { when = { service = 'netbios-ssn' },      use = { type = 'dce_smb' } },\n"
+      << "    { when = { service = 'dce_http_server' },  use = { type = 'dce_http_server' } },\n"
+      << "    { when = { service = 'dce_http_proxy' },   use = { type = 'dce_http_proxy' } },\n\n"
+      << "    { when = { service = 'cip' },              use = { type = 'cip' } },\n"
+      << "    { when = { service = 'dnp3' },             use = { type = 'dnp3' } },\n"
+      << "    { when = { service = 'dns' },              use = { type = 'dns' } },\n"
+      << "    { when = { service = 'ftp' },              use = { type = 'ftp_server' } },\n"
+      << "    { when = { service = 'ftp-data' },         use = { type = 'ftp_data' } },\n"
+      << "    { when = { service = 'gtp' },              use = { type = 'gtp_inspect' } },\n"
+      << "    { when = { service = 'imap' },             use = { type = 'imap' } },\n"
+      << "    { when = { service = 'http' },             use = { type = 'http_inspect' } },\n"
+      << "    { when = { service = 'http2' },            use = { type = 'http2_inspect' } },\n"
+      << "    { when = { service = 'iec104' },           use = { type = 'iec104' } },\n"
+      << "    { when = { service = 'mms' },              use = { type = 'mms' } },\n"
+      << "    { when = { service = 'modbus' },           use = { type = 'modbus' } },\n"
+      << "    { when = { service = 'pop3' },             use = { type = 'pop' } },\n"
+      << "    { when = { service = 'ssh' },              use = { type = 'ssh' } },\n"
+      << "    { when = { service = 'sip' },              use = { type = 'sip' } },\n"
+      << "    { when = { service = 'smtp' },             use = { type = 'smtp' } },\n"
+      << "    { when = { service = 'ssl' },              use = { type = 'ssl' } },\n"
+      << "    { when = { service = 'sunrpc' },           use = { type = 'rpc_decode' } },\n"
+      << "    { when = { service = 's7commplus' },       use = { type = 's7commplus' } },\n"
+      << "    { when = { service = 'telnet' },           use = { type = 'telnet' } },\n\n"
+      << "    { use = { type = 'wizard' } }\n"
+      << "}\n\n"
+
+      << "references = default_references\n"
+      << "classifications = default_classifications\n";
 
   // DAQ
   out << "daq_module = 'afpacket'\n";
@@ -584,88 +668,38 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   out << "ips = {\n";
   out << "  rules = [[\n";
   out << "    include " << (root / "rules" / "default.rules").string() << "\n";
-  if(need_http){
-    out <<  "    include " << (root / "rules" / "http.rules").string() << "\n";
+  if (need_http)
+  {
+    out << "    include " << (root / "rules" / "http.rules").string() << "\n";
   }
-  if(need_telnet){
-    out <<  "    include " << (root / "rules" / "telnet.rules").string() << "\n";
+  if (need_telnet)
+  {
+    out << "    include " << (root / "rules" / "telnet.rules").string() << "\n";
   }
-  if(need_sql){
-    out <<  "    include " << (root / "rules" / "sql.rules").string() << "\n";
+  if (need_sql)
+  {
+    out << "    include " << (root / "rules" / "sql.rules").string() << "\n";
   }
-  if(need_sip){
-    out <<  "    include " << (root / "rules" / "sip.rules").string() << "\n";
+  if (need_sip)
+  {
+    out << "    include " << (root / "rules" / "sip.rules").string() << "\n";
   }
-  if(need_smtp){
-    out <<  "    include " << (root / "rules" / "smtp.rules").string() << "\n";
+  if (need_smtp)
+  {
+    out << "    include " << (root / "rules" / "smtp.rules").string() << "\n";
   }
-  if(need_ssh){
-    out <<  "    include " << (root / "rules" / "ssh.rules").string() << "\n";
+  if (need_ssh)
+  {
+    out << "    include " << (root / "rules" / "ssh.rules").string() << "\n";
   }
-  if(need_ftp){
-    out <<  "    include " << (root / "rules" / "ftp.rules").string() << "\n";
+  if (need_ftp)
+  {
+    out << "    include " << (root / "rules" / "ftp.rules").string() << "\n";
   }
   out << "  ]],\n";
   out << "  mode = '" << (mode ? "inline" : "tap") << "',\n"
       << "  enable_builtin_rules = false,\n"
-      << "  variables = {\n";
-  // IP SERVER
-  out << "    nets = {\n"
-      << "      HOME_NET     = HOME_NET,\n"
-      << "      EXTERNAL_NET = EXTERNAL_NET,\n";
-  if (need_http)
-  {
-    out << "      HTTP_SERVERS = HOME_NET,\n";
-  }
-  if (need_telnet)
-  {
-    out << "      TELNET_SERVERS = HOME_NET,\n";
-  }
-  if (need_sql)
-  {
-    out << "      SQL_SERVERS = HOME_NET,\n";
-  }
-  if (need_sip)
-  {
-    out << "      SIP_SERVERS = HOME_NET,\n";
-  }
-  if (need_smtp)
-  {
-    out << "      SMTP_SERVERS = HOME_NET,\n";
-  }
-  out << "    },\n";
-
-  // PORT SERVER
-  if (need_http || need_telnet || need_ftp || need_sql || need_sip)
-  {
-    out << "    ports = {\n";
-    if (need_http)
-    {
-      out << "      HTTP_PORTS = HTTP_PORTS,\n";
-    }
-    if (need_telnet)
-    {
-      out << "      FILE_DATA_PORTS = FILE_DATA_PORTS,\n";
-    }
-    if (need_ftp)
-    {
-      out << "      FTP_PORTS = FTP_PORTS,\n";
-    }
-    if (need_sql)
-    {
-      out << "      ORACLE_PORTS = ORACLE_PORTS,\n";
-    }
-    if (need_sip)
-    {
-      out << "      SIP_PORTS = SIP_PORTS,\n";
-    }
-    if (need_ssh)
-    {
-      out << "      SSH_PORTS = SSH_PORTS,\n";
-    }
-    out << "    },\n";
-  }
-  out << "  }\n"
+      << "  variables = default_variables,\n"
       << "}\n\n";
 
   // Logging
@@ -677,13 +711,9 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 
   out << "pkt_logger = { file=true, limit=1000 }\n\n";
 
-  // Binder
-  out << "binder = {\n"
-         "  { when={ proto='tcp' }, use={ type='stream_tcp' } },\n"
-         "  { when={ proto='udp' }, use={ type='stream_udp' } },\n";
-  if (need_http)
-    out << "  { when={ service='http' }, use={ type='http_inspect' } },\n";
-  out << "  { use={ type='wizard' } }\n};\n";
+  out << "if ( tweaks ~= nil ) then\n"
+      << "    include(tweaks .. '.lua')\n"
+      << "end\n";
 
   out.close();
 }
