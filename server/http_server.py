@@ -7,9 +7,10 @@ class MyHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b"<h1>Hello from localhost HTTP server!</h1>")
+        self.wfile.write(b"<h1>Hello from enp2s0 HTTP server!</h1>")
 
-HOST = 'localhost'
+# เปลี่ยนจาก 'localhost' เป็น IP จริงของ interface
+HOST = '192.168.1.121'
 PORT = 8080
 
 httpd = HTTPServer((HOST, PORT), MyHandler)

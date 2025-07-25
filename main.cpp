@@ -298,6 +298,8 @@ void sniff(NetworkConfig &conf)
           if (flow_table.size() > flows_before) {
             total_flows++;
           }
+
+          // cout << packet.src_addr << " -> " << packet.dst_addr << "[" << packet.protocol << "]" << endl;
         }
         return true; });
 }
@@ -408,12 +410,12 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   // HTTP
   if (need_http && !http_ports.empty())
   {
-    out << "http_inspect = {\n"
-           "  request_depth = -1,\n"
-           "  response_depth = -1,\n"
-           "  unzip = true,\n"
-           "  normalize_utf = true\n"
-           "}\n\n";
+    // out << "http_inspect = {\n"
+    //        "  request_depth = -1,\n"
+    //        "  response_depth = -1,\n"
+    //        "  unzip = true,\n"
+    //        "  normalize_utf = true\n"
+    //        "}\n\n";
 
     ostringstream ip_list;
     bool first = true;
@@ -630,8 +632,17 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
       << "    { when = { proto = 'tcp', ports = '44818', role = 'server' }, use = { type = 'cip' } },\n\n"
       << "    { when = { proto = 'tcp', service = 'dcerpc' },  use = { type = 'dce_tcp' } },\n"
       << "    { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },\n"
-      << "    { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },\n\n"
-      << "    { when = { service = 'netbios-ssn' },      use = { type = 'dce_smb' } },\n"
+      << "    { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },\n\n";
+  if (need_http && !http_ports.empty())
+  {
+    vector<string> ports_vec(http_ports.begin(), http_ports.end());
+    string ports_list = join(ports_vec, " "); // เช่น "8000 8080"
+
+    out << "    { when = { proto = 'tcp', ports = \"" << ports_list
+        << "\", role = 'server' }, use = { type = 'http_inspect' } },\n";
+  }
+
+  out << "    { when = { service = 'netbios-ssn' },      use = { type = 'dce_smb' } },\n"
       << "    { when = { service = 'dce_http_server' },  use = { type = 'dce_http_server' } },\n"
       << "    { when = { service = 'dce_http_proxy' },   use = { type = 'dce_http_proxy' } },\n\n"
       << "    { when = { service = 'cip' },              use = { type = 'cip' } },\n"

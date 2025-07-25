@@ -1,3 +1,5 @@
+HTTP_SERVERS = { '192.168.1.121' }
+HTTP_PORTS = '8080'
 HOME_NET = '192.168.1.121'
 EXTERNAL_NET = 'any'
 
@@ -65,6 +67,7 @@ binder = {
     { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },
     { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },
 
+    { when = { proto = 'tcp', ports = "8080", role = 'server' }, use = { type = 'http_inspect' } },
     { when = { service = 'netbios-ssn' },      use = { type = 'dce_smb' } },
     { when = { service = 'dce_http_server' },  use = { type = 'dce_http_server' } },
     { when = { service = 'dce_http_proxy' },   use = { type = 'dce_http_proxy' } },
@@ -100,6 +103,7 @@ daq_mode = 'passive'
 ips = {
   rules = [[
     include /home/fruitto/Project/HIPS/rules/default.rules
+    include /home/fruitto/Project/HIPS/rules/http.rules
   ]],
   mode = 'tap',
   enable_builtin_rules = false,
