@@ -1,5 +1,6 @@
 HTTP_SERVERS = { '192.168.1.121' }
 HTTP_PORTS = '8080'
+FILE_DATA_PORTS = HTTP_PORTS ..  '143 110'
 HOME_NET = '192.168.1.121'
 EXTERNAL_NET = 'any'
 
@@ -111,7 +112,7 @@ ips = {
 }
 
 alert_json = {
-    fields = 'seconds timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class',
+    fields = 'timestamp seconds proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class service',
     file = true,
     limit = 100,
 }

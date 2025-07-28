@@ -79,13 +79,6 @@ int main()
     askService("FTP", conf.FTP_SERVERS, conf.FTP_PORTS);
     askService("Oracle", conf.SQL_SERVERS, conf.ORACLE_PORTS);
     askService("TELNET", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
-    askService("SIP", conf.SIP_SERVERS, conf.SIP_PORTS);
-
-    // SMTP
-    cout << "SMTP Service? [y/n]: ";
-    cin >> yesno;
-    cin.ignore();
-    conf.SMTP_SERVERS = (yesno == 'y' || yesno == 'Y');
 
     configuredInterfaces.push_back(conf);
   }
@@ -353,11 +346,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   set<string> oracle_ports;
   bool need_sql = false;
 
-  set<string> sip_ports;
-  bool need_sip = false;
-
-  bool need_smtp = false;
-
   set<string> ssh_ports;
   bool need_ssh = false;
 
@@ -387,17 +375,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     {
       need_sql = true;
       oracle_ports.insert(nc.ORACLE_PORTS.begin(), nc.ORACLE_PORTS.end());
-    }
-
-    if (nc.SIP_SERVERS.value_or(false))
-    {
-      need_sip = true;
-      sip_ports.insert(nc.SIP_PORTS.begin(), nc.SIP_PORTS.end());
-    }
-
-    if (nc.SMTP_SERVERS.value_or(false))
-    {
-      need_smtp = true;
     }
 
     if (nc.SSH_SERVERS.value_or(false))
@@ -438,6 +415,10 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
       first = false;
     }
     out << "HTTP_PORTS = '" << port_list.str() << "'\n";
+    out << "FILE_DATA_PORTS = HTTP_PORTS .. " " '143 110'\n";
+
+  } else {
+    out << "FILE_DATA_PORTS = '143 110'\n";
   }
 
   // Telnet
@@ -485,20 +466,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
     out << "ORACLE_PORTS = '" << port_list.str() << "'\n";
   }
 
-  // SIP
-  if (need_sip && !sip_ports.empty())
-  {
-    ostringstream port_list;
-    bool first = true;
-    for (const auto &port : sip_ports)
-    {
-      if (!first)
-        port_list << " ";
-      port_list << port;
-      first = false;
-    }
-    out << "SIP_PORTS = '" << port_list.str() << "'\n";
-  }
 
   // SSH
   if (need_ssh && !ssh_ports.empty())
@@ -691,14 +658,6 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   {
     out << "    include " << (root / "rules" / "sql.rules").string() << "\n";
   }
-  if (need_sip)
-  {
-    out << "    include " << (root / "rules" / "sip.rules").string() << "\n";
-  }
-  if (need_smtp)
-  {
-    out << "    include " << (root / "rules" / "smtp.rules").string() << "\n";
-  }
   if (need_ssh)
   {
     out << "    include " << (root / "rules" / "ssh.rules").string() << "\n";
@@ -715,7 +674,7 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 
   // Logging
   out << "alert_json = {\n"
-         "    fields = 'seconds timestamp pkt_num proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class',\n"
+         "    fields = 'timestamp seconds proto pkt_gen pkt_len dir src_ap dst_ap rule action msg class service',\n"
          "    file = true,\n"
          "    limit = 100,\n"
          "}\n\n";
