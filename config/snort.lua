@@ -105,6 +105,7 @@ ips = {
   rules = [[
     include /home/fruitto/Project/HIPS/rules/default.rules
     include /home/fruitto/Project/HIPS/rules/http.rules
+    include /home/fruitto/Project/HIPS/rules/emerging.rules/rules/emerging-activex.rules
   ]],
   mode = 'tap',
   enable_builtin_rules = false,

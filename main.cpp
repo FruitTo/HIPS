@@ -297,6 +297,16 @@ void sniff(NetworkConfig &conf)
         return true; });
 }
 
+/* 
+$HOME_NET & $EXTERNAL_NET = Default
+$HTTP_SERVERS & $HTTP_PORTS = http.rules
+$FTP_PORTS = ftp.rules
+$SQL_SERVERS & $ORACLE_PORTS = sql.rules
+$SSH_PORTS = ssh.rules
+$TELNET_SERVERS = telnet.rules 
+*/
+
+
 void parsePorts(const string &input, vector<string> &target)
 {
   istringstream iss(input);
