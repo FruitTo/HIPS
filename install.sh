@@ -54,8 +54,27 @@ sudo ldconfig
 
 snort -V
 
-# sudo ethtool -K enp2s0 tx off rx off
-# sudo ethtool -K enp2s0 tx on rx on
+# onnx
+sudo apt-get install -y language-pack-en
+sudo apt install nlohmann-json3-dev
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LANG=en_US.UTF-8
 
-# sudo ip link set enp2s0 promisc on
-# sudo ip link set enp2s0 promisc off
+git clone --branch v1.22.1 --recursive https://github.com/microsoft/onnxruntime.git
+cd onnxruntime
+
+./build.sh --config RelWithDebInfo --build_shared_lib --parallel 4 --skip_tests
+sudo cmake --install build/Linux/RelWithDebInfo --prefix /opt/onnxruntime-1.22.1
+echo "/opt/onnxruntime-1.22.1/lib" | sudo tee /etc/ld.so.conf.d/onnxruntime.conf
+sudo ldconfig
+
+echo 'export PKG_CONFIG_PATH=/opt/onnxruntime-1.22.1/lib/pkgconfig:$PKG_CONFIG_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+# json library
+git clone https://github.com/nlohmann/json.git
+cd json
+mkdir build
+cd build
+cmake ..
+sudo make install
