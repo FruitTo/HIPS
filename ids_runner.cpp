@@ -1,8 +1,24 @@
-// ids_runner.cpp (re-fetch names at run-time, robust to empty/garbled names)
+// ids_runner.cpp - corrected and hardened for ONNX Runtime C++
+// - Add IDSResult::bin_prob as alias to p_attack for backward compatibility
+// - Fix multiclass off-by-one (+1) because multiclass.onnx was trained on attack-only classes
+// - Prefer const GetTensorData<T>() over mutable where we don't modify buffers
+// - Avoid initializer_list assignment on vector<AllocatedStringPtr> (use .clear(), emplace_back)
+// - Keep AllocatedStringPtr holders alive across Run() to avoid dangling pointers
+// - Robustly locate probability tensor even if output names differ (ZipMap disabled)
+// Build:
+//   export ORT=/opt/onnxruntime-1.22.1
+//   g++ -std=c++17 inference.cpp -I"$ORT/include" -L"$ORT/lib" -lonnxruntime \
+//      -Wl,-rpath,"$ORT/lib" -O2 -o inference
+//
+// Notes:
+//   - Ort::AllocatedStringPtr is a unique_ptr owning names allocated by ORT; keep it alive
+//     and don't copy vectors with initializer_list (unique_ptr is non-copyable).
+//     Refs: cppreference unique_ptr non-copyable; ORT AllocatedStringPtr docs. 
+//     (See citations in the chat message.)
+
 #include <onnxruntime/onnxruntime_cxx_api.h>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
-#include <filesystem>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -10,289 +26,301 @@
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
-#include <cmath>
 #include <array>
 
 using json = nlohmann::json;
-namespace fs = std::filesystem;
-
-static std::string norm_key(std::string s){
-    std::string out; out.reserve(s.size());
-    for(char c: s) if (std::isalnum(static_cast<unsigned char>(c)))
-        out.push_back(std::tolower(static_cast<unsigned char>(c)));
-    return out;
-}
-static json jsonLoad(const fs::path& p){
-    std::ifstream f(p);
-    if (!f) throw std::runtime_error("cannot open "+p.string());
-    return json::parse(f, nullptr, true, true);
-}
 
 struct IDSResult {
     bool        is_attack{false};
-    float       bin_prob{0.f};
-    int         class_id{-1};
-    std::string class_name;
-    float       class_prob{0.f};
+    float       p_attack{0.0f};   // probability of "attack" from binary model (index 1)
+    float       bin_prob{0.0f};   // alias for backward compatibility with existing code
+    int         class_id{0};      // 0..7 (0 = Benign)
+    float       class_prob{0.0f}; // probability of chosen attack subclass (from multiclass)
+    std::string class_name{"Benign"};
 };
+
+static std::string norm_key(std::string s){
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
+    s.erase(std::remove_if(s.begin(), s.end(),
+            [](unsigned char c){ return !(std::isalnum(c) || c=='_'); }), s.end());
+    return s;
+}
 
 class IDSRunner {
 public:
-    explicit IDSRunner(const fs::path& artifacts_dir)
-    : env_(ORT_LOGGING_LEVEL_WARNING, "ids")
-    {
-        // meta / threshold
-        auto meta = jsonLoad(artifacts_dir / "meta.json");
-        thr_ = jsonLoad(artifacts_dir / "threshold.json").value("BIN_THRESHOLD", 0.5f);
+    IDSRunner(const std::string& artifacts_dir = "./artifacts",
+              const std::string& bin_name = "binary.onnx",
+              const std::string& mul_name = "multiclass.onnx",
+              const std::string& meta_name = "meta.json",
+              const std::string& thr_name  = "threshold.json")
+    : env_(ORT_LOGGING_LEVEL_WARNING, "ids"),
+      so_(),
+      bin_(nullptr),
+      mul_(nullptr) {
 
-        if (!meta.contains("feature_order") || !meta["feature_order"].is_array())
-            throw std::runtime_error("meta.json missing feature_order");
-        n_features_ = static_cast<int64_t>(meta["feature_order"].size());
+        so_.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
 
-        for (int i=0;i<n_features_;++i) {
-            feat_index_[ norm_key(meta["feature_order"][i].get<std::string>()) ] = i;
-        }
-        if (meta.contains("class_map") && meta["class_map"].is_object()) {
-            for (auto it = meta["class_map"].begin(); it != meta["class_map"].end(); ++it) {
-                class_map_[ std::stoi(it.key()) ] = it.value().get<std::string>();
+        const std::string bin_path  = artifacts_dir + "/" + bin_name;
+        const std::string mul_path  = artifacts_dir + "/" + mul_name;
+        const std::string meta_path = artifacts_dir + "/" + meta_name;
+        const std::string thr_path  = artifacts_dir + "/" + thr_name;
+
+        // Load meta
+        {
+            std::ifstream f(meta_path);
+            if (!f) throw std::runtime_error("cannot open meta: " + meta_path);
+            json meta = json::parse(f, nullptr, true, true);
+            if (!meta.contains("feature_order") || !meta["feature_order"].is_array())
+                throw std::runtime_error("meta.json missing feature_order[]");
+            feature_order_ = meta["feature_order"].get<std::vector<std::string>>();
+            n_features_ = static_cast<int64_t>(feature_order_.size());
+            feat_index_.reserve(feature_order_.size());
+            for (size_t i = 0; i < feature_order_.size(); ++i){
+                feat_index_[ norm_key(feature_order_[i]) ] = static_cast<int>(i);
             }
-        }
-
-        // SessionOptions
-        Ort::SessionOptions so;
-        so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-        so.SetIntraOpNumThreads(1);
-
-        // Sessions
-        bin_.reset(new Ort::Session(env_, (artifacts_dir/"binary.onnx").string().c_str(), so));
-        mul_.reset(new Ort::Session(env_, (artifacts_dir/"multiclass.onnx").string().c_str(), so));
-
-        // cache I/O counts + shapes (แต่ "ชื่อ" จะดึงสดทุกครั้ง)
-        Ort::AllocatorWithDefaultOptions alloc;
-        bin_in_cnt_  = bin_->GetInputCount();
-        bin_out_cnt_ = bin_->GetOutputCount();
-        if (bin_in_cnt_==0 || bin_out_cnt_==0) throw std::runtime_error("binary.onnx I/O invalid");
-
-        if (bin_in_cnt_ == 1) {
-            single_input_   = true;
-            bin_vec_shape_  = sanitize_single_vector(get_input_shape(*bin_, 0), n_features_);
-        } else {
-            single_input_ = false;
-            bin_in_shapes_.resize(bin_in_cnt_);
-            for (size_t i=0;i<bin_in_cnt_;++i)
-                bin_in_shapes_[i] = sanitize_scalar_input(get_input_shape(*bin_, i));
-        }
-
-        mul_in_cnt_  = mul_->GetInputCount();
-        mul_out_cnt_ = mul_->GetOutputCount();
-        if (mul_in_cnt_==0 || mul_out_cnt_==0) throw std::runtime_error("multiclass.onnx I/O invalid");
-
-        if (mul_in_cnt_ == 1) {
-            mul_single_input_ = true;
-            mul_vec_shape_    = sanitize_single_vector(get_input_shape(*mul_,0), n_features_);
-        } else {
-            mul_single_input_ = false;
-            mul_in_shapes_.resize(mul_in_cnt_);
-            for (size_t i=0;i<mul_in_cnt_;++i)
-                mul_in_shapes_[i] = sanitize_scalar_input(get_input_shape(*mul_, i));
-        }
-    }
-
-    IDSResult Predict(const std::unordered_map<std::string, float>& feat_map) const {
-        IDSResult r;
-
-        // Build dense features in training order
-        std::vector<float> feats(static_cast<size_t>(n_features_), 0.0f);
-        for (auto& kv: feat_map) {
-            auto it = feat_index_.find( norm_key(kv.first) );
-            if (it != feat_index_.end()) feats[ it->second ] = kv.second;
-        }
-
-        Ort::AllocatorWithDefaultOptions alloc;
-        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-
-        // ------ Run binary ------
-        std::vector<const char*> in_names;
-        std::vector<Ort::Value>  inputs;
-
-        // ชื่ออินพุต/เอาต์พุต: ดึงสด และเก็บ holder ไว้ให้มีอายุจนจบ Run()
-        std::vector<Ort::AllocatedStringPtr> name_holders;
-        name_holders.reserve(bin_in_cnt_ + 1);
-
-        if (single_input_) {
-            auto nm = bin_->GetInputNameAllocated(0, alloc);
-            in_names = { nm.get() };
-            name_holders.emplace_back(std::move(nm));
-
-            inputs.emplace_back( Ort::Value::CreateTensor<float>(
-                mem, feats.data(), feats.size(),
-                bin_vec_shape_.data(), bin_vec_shape_.size() ));
-        } else {
-            in_names.resize(bin_in_cnt_);
-            inputs.reserve(bin_in_cnt_);
-            for (size_t i=0;i<bin_in_cnt_;++i){
-                auto nm = bin_->GetInputNameAllocated(i, alloc);
-                const char* cname = nm.get();
-                name_holders.emplace_back(std::move(nm));
-                in_names[i] = cname;
-
-                // map feature index (by name → index, fallback by position)
-                int fidx = map_feature_index(cname, int(i));
-                const float* ptr = (fidx>=0 && fidx<n_features_) ? &feats[static_cast<size_t>(fidx)] : &zero_;
-
-                inputs.emplace_back( Ort::Value::CreateTensor<float>(
-                    mem, const_cast<float*>(ptr), 1,
-                    bin_in_shapes_[i].data(), bin_in_shapes_[i].size() ));
-            }
-        }
-
-        // output name (สด)
-        auto out_nm = bin_->GetOutputNameAllocated(0, alloc);
-        std::array<const char*,1> bin_out_names = { out_nm.get() };
-        name_holders.emplace_back(std::move(out_nm));
-
-        auto outs = bin_->Run(Ort::RunOptions{nullptr},
-                              in_names.data(), inputs.data(), in_names.size(),
-                              bin_out_names.data(), bin_out_names.size());
-
-        auto& bout  = outs.front();
-        auto  binfo = bout.GetTensorTypeAndShapeInfo();
-        auto  bcnt  = binfo.GetElementCount();
-        float* bptr = bout.GetTensorMutableData<float>();
-
-        float p = 0.f;
-        if (bcnt==1) {
-            float v = bptr[0];
-            p = (v<0.f || v>1.f)? (1.f/(1.f+std::exp(-v))) : v;
-        } else if (bcnt==2) {
-            float a=bptr[0], b=bptr[1], m=std::max(a,b);
-            p = std::exp(b-m) / (std::exp(a-m)+std::exp(b-m));
-        } else {
-            float m=bptr[0]; for (size_t i=1;i<bcnt;++i) m=std::max(m,bptr[i]);
-            double sum=0, best=0;
-            for (size_t i=0;i<bcnt;++i) { double e=std::exp(double(bptr[i]-m)); sum+=e; if(e>best) best=e; }
-            p = float(best/sum);
-        }
-        r.bin_prob = p;
-        r.is_attack = (p >= thr_);
-
-        // ------ Run multiclass if needed ------
-        if (r.is_attack) {
-            std::vector<const char*> n2;
-            std::vector<Ort::Value>  i2;
-            std::vector<Ort::AllocatedStringPtr> holders2;
-            holders2.reserve(mul_in_cnt_ + 1);
-
-            if (mul_single_input_) {
-                auto nm = mul_->GetInputNameAllocated(0, alloc);
-                n2 = { nm.get() };
-                holders2.emplace_back(std::move(nm));
-
-                i2.emplace_back( Ort::Value::CreateTensor<float>(
-                    mem, feats.data(), feats.size(),
-                    mul_vec_shape_.data(), mul_vec_shape_.size() ));
-            } else {
-                n2.resize(mul_in_cnt_); i2.reserve(mul_in_cnt_);
-                for (size_t i=0;i<mul_in_cnt_;++i){
-                    auto nm = mul_->GetInputNameAllocated(i, alloc);
-                    const char* cname = nm.get();
-                    holders2.emplace_back(std::move(nm));
-                    n2[i] = cname;
-
-                    int fidx = map_feature_index(cname, int(i));
-                    const float* ptr = (fidx>=0 && fidx<n_features_) ? &feats[static_cast<size_t>(fidx)] : &zero_;
-                    i2.emplace_back( Ort::Value::CreateTensor<float>(
-                        mem, const_cast<float*>(ptr), 1,
-                        mul_in_shapes_[i].data(), mul_in_shapes_[i].size() ));
+            if (meta.contains("class_map") && meta["class_map"].is_object()){
+                for (auto it = meta["class_map"].begin(); it != meta["class_map"].end(); ++it){
+                    class_map_[ std::stoi(it.key()) ] = it.value().get<std::string>();
                 }
             }
-
-            auto out2 = mul_->GetOutputNameAllocated(0, alloc);
-            std::array<const char*,1> mul_out_names = { out2.get() };
-            holders2.emplace_back(std::move(out2));
-
-            auto o2 = mul_->Run(Ort::RunOptions{nullptr},
-                                n2.data(), i2.data(), n2.size(),
-                                mul_out_names.data(), mul_out_names.size());
-
-            auto& mval = o2.front();
-            auto  minfo= mval.GetTensorTypeAndShapeInfo();
-            auto  mcnt = minfo.GetElementCount();
-            float* md  = mval.GetTensorMutableData<float>();
-
-            float m=md[0]; for (size_t i=1;i<mcnt;++i) m = std::max(m, md[i]);
-            double sum=0.0, best=0.0; size_t arg=0;
-            for (size_t i=0;i<mcnt;++i) {
-                double e = std::exp(double(md[i]-m));
-                sum += e;
-                if (e > best) { best = e; arg = i; }
-            }
-            r.class_id   = int(arg);
-            r.class_prob = float(best / sum);
-            auto it = class_map_.find(r.class_id);
-            if (it != class_map_.end()) r.class_name = it->second;
+        }
+        // Load threshold
+        {
+            std::ifstream f(thr_path);
+            if (!f) throw std::runtime_error("cannot open threshold: " + thr_path);
+            json j = json::parse(f, nullptr, true, true);
+            if (!j.contains("BIN_THRESHOLD"))
+                throw std::runtime_error("threshold.json missing BIN_THRESHOLD");
+            bin_threshold_ = j["BIN_THRESHOLD"].get<float>();
         }
 
+        // Create sessions
+        bin_ = Ort::Session(env_, bin_path.c_str(), so_);
+        mul_ = Ort::Session(env_, mul_path.c_str(), so_);
+
+        // Cache I/O counts
+        bin_in_cnt_ = bin_.GetInputCount();
+        bin_out_cnt_ = bin_.GetOutputCount();
+        mul_in_cnt_ = mul_.GetInputCount();
+        mul_out_cnt_ = mul_.GetOutputCount();
+
+        single_input_bin_ = (bin_in_cnt_ == 1);
+        single_input_mul_ = (mul_in_cnt_ == 1);
+    }
+
+    // Map {name->value} -> ordered vector by meta["feature_order"] then predict
+    IDSResult Predict(const std::unordered_map<std::string,float>& fmap){
+        std::vector<float> x(static_cast<size_t>(n_features_), 0.0f);
+        for (const auto& kv: fmap){
+            auto it = feat_index_.find( norm_key(kv.first) );
+            if (it != feat_index_.end()){
+                x[ static_cast<size_t>(it->second) ] = kv.second;
+            }
+        }
+        return PredictFromOrdered(x);
+    }
+
+    // Already-ordered feature vector (size == D)
+    IDSResult PredictFromOrdered(const std::vector<float>& x_ordered){
+        if (static_cast<int64_t>(x_ordered.size()) != n_features_)
+            throw std::runtime_error("PredictFromOrdered: size mismatch: got " +
+                std::to_string(x_ordered.size()) + ", expected " + std::to_string(n_features_));
+
+        // --- Binary pass ---
+        float p_attack = run_binary(x_ordered);
+        IDSResult r;
+        r.p_attack = p_attack;
+        r.bin_prob = p_attack; // keep compatibility with existing code
+
+        if (p_attack < bin_threshold_){
+            r.is_attack = false;
+            r.class_id = 0;
+            auto it = class_map_.find(0);
+            r.class_name = (it!=class_map_.end() ? it->second : "Benign");
+            r.class_prob = 1.0f - p_attack;
+            return r;
+        }
+
+        // --- Multiclass pass (attack-only; output 0..6 => +1) ---
+        int    arg;
+        float  best, normprob;
+        run_multiclass(x_ordered, arg, best, normprob);
+        r.is_attack = true;
+        r.class_id = arg + 1;              // critical fix (+1)
+        r.class_prob = normprob;
+        auto it = class_map_.find(r.class_id);
+        r.class_name = (it!=class_map_.end() ? it->second : "Attack");
         return r;
     }
 
 private:
-    // helpers
-    static std::vector<int64_t> get_input_shape(Ort::Session& s, size_t i){
-        Ort::TypeInfo ti = s.GetInputTypeInfo(i);
-        return ti.GetTensorTypeAndShapeInfo().GetShape();
+    // --- Helpers for names ---
+    static std::vector<const char*> get_input_names(Ort::Session& s,
+                                              Ort::AllocatorWithDefaultOptions& alloc,
+                                              size_t count,
+                                              std::vector<Ort::AllocatedStringPtr>& holders){
+        std::vector<const char*> names;
+        names.reserve(count);
+        holders.reserve(count);
+        for (size_t i=0; i<count; ++i){
+            holders.emplace_back( s.GetInputNameAllocated(i, alloc) );
+            names.push_back( holders.back().get() );
+        }
+        return names;
     }
-    static std::vector<int64_t> sanitize_single_vector(std::vector<int64_t> d, int64_t n){
-        if (d.size()==1){ d[0] = (d[0]<0)? n: n; }
-        else if (d.size()==2){ d[0]=1; d[1]=(d[1]<0)? n: n; }
-        else d = {1,n};
-        return d;
+    static std::vector<const char*> get_output_names(Ort::Session& s,
+                                                     Ort::AllocatorWithDefaultOptions& alloc,
+                                                     size_t count,
+                                                     std::vector<Ort::AllocatedStringPtr>& holders){
+        std::vector<const char*> names;
+        names.reserve(count);
+        holders.reserve(count);
+        for (size_t i=0; i<count; ++i){
+            holders.emplace_back( s.GetOutputNameAllocated(i, alloc) );
+            names.push_back( holders.back().get() );
+        }
+        return names;
     }
-    static std::vector<int64_t> sanitize_scalar_input(std::vector<int64_t> d){
-        if (d.empty()) return {1};
-        for (auto& x: d) if (x<0) x=1;
-        size_t prod=1; for (auto x: d) prod*=size_t(x);
-        if (prod!=1) d={1,1};
-        return d;
-    }
-    int map_feature_index(const char* cname, int fallback_index) const {
-        if (!cname) return (fallback_index < n_features_ ? fallback_index : -1);
-        std::string key = norm_key(std::string(cname));
-        if (key.empty()) return (fallback_index < n_features_ ? fallback_index : -1);
-        auto it = feat_index_.find(key);
-        if (it != feat_index_.end()) return it->second;
 
-        // ลองแทน '_' เป็น ' ' แล้ว normalize ใหม่
-        std::string guess = std::string(cname);
-        std::replace(guess.begin(), guess.end(), '_', ' ');
-        auto it2 = feat_index_.find( norm_key(guess) );
-        if (it2 != feat_index_.end()) return it2->second;
+    // Pick the first float tensor (length >= 2) as probability buffer
+    static const float* pick_prob_tensor(const std::vector<Ort::Value>& outs, size_t& len_out){
+        for (const auto& v: outs){
+            if (!v.IsTensor()) continue;
+            auto ti = v.GetTensorTypeAndShapeInfo();
+            if (ti.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) continue;
+            auto shape = ti.GetShape();
+            size_t total = 1;
+            for (auto d: shape){ total *= static_cast<size_t>(d < 0 ? 1 : d); }
+            if (total >= 2){
+                len_out = total;
+                return v.GetTensorData<float>(); // const
+            }
+        }
+        len_out = 0;
+        return nullptr;
+    }
 
-        // fallback: ตามลำดับ index
-        return (fallback_index < n_features_) ? fallback_index : -1;
+    float run_binary(const std::vector<float>& x){
+        Ort::AllocatorWithDefaultOptions alloc;
+        std::vector<Ort::AllocatedStringPtr> in_hold, out_hold;
+        std::vector<const char*> in_names, out_names;
+
+        if (single_input_bin_){
+            in_hold.clear();
+            in_hold.emplace_back( bin_.GetInputNameAllocated(0, alloc) ); // keep alive
+            in_names = { in_hold.back().get() };
+        } else {
+            in_names = get_input_names(bin_, alloc, bin_in_cnt_, in_hold);
+        }
+        out_names = get_output_names(bin_, alloc, bin_out_cnt_, out_hold);
+
+        std::vector<Ort::Value> inputs;
+        inputs.reserve(bin_in_cnt_);
+        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+        if (single_input_bin_){
+            std::array<int64_t,2> dims{1, n_features_};
+            inputs.emplace_back( Ort::Value::CreateTensor<float>(mem,
+                                    const_cast<float*>(x.data()),
+                                    x.size(), dims.data(), dims.size()) );
+        } else {
+            float zero_buf = 0.0f;
+            for (size_t i=0; i<bin_in_cnt_; ++i){
+                std::string inname = in_hold[i].get();
+                auto it = feat_index_.find( norm_key(inname) );
+                const float* ptr = &zero_buf;
+                if (it != feat_index_.end()){
+                    ptr = &x[ static_cast<size_t>(it->second) ];
+                }
+                std::array<int64_t,2> dims{1,1};
+                inputs.emplace_back( Ort::Value::CreateTensor<float>(mem,
+                                        const_cast<float*>(ptr), 1, dims.data(), dims.size()) );
+            }
+        }
+
+        auto outs = bin_.Run(Ort::RunOptions{nullptr},
+                             in_names.data(), inputs.data(), inputs.size(),
+                             out_names.data(), out_names.size());
+
+        size_t nprob = 0;
+        const float* p = pick_prob_tensor(outs, nprob);
+        if (!p) throw std::runtime_error("binary.onnx: no float probability tensor in outputs");
+        if (nprob == 2) return p[1];            // [p0, p1] -> attack prob at index 1
+        return p[nprob-1];                      // fallback
+    }
+
+    void run_multiclass(const std::vector<float>& x, int& argmax, float& best, float& normprob){
+        Ort::AllocatorWithDefaultOptions alloc;
+        std::vector<Ort::AllocatedStringPtr> in_hold, out_hold;
+        std::vector<const char*> in_names, out_names;
+
+        if (single_input_mul_){
+            in_hold.clear();
+            in_hold.emplace_back( mul_.GetInputNameAllocated(0, alloc) );
+            in_names = { in_hold.back().get() };
+        } else {
+            in_names = get_input_names(mul_, alloc, mul_in_cnt_, in_hold);
+        }
+        out_names = get_output_names(mul_, alloc, mul_out_cnt_, out_hold);
+
+        std::vector<Ort::Value> inputs;
+        inputs.reserve(mul_in_cnt_);
+        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+        if (single_input_mul_){
+            std::array<int64_t,2> dims{1, n_features_};
+            inputs.emplace_back( Ort::Value::CreateTensor<float>(mem,
+                                    const_cast<float*>(x.data()),
+                                    x.size(), dims.data(), dims.size()) );
+        } else {
+            float zero_buf = 0.0f;
+            for (size_t i=0; i<mul_in_cnt_; ++i){
+                std::string inname = in_hold[i].get();
+                auto it = feat_index_.find( norm_key(inname) );
+                const float* ptr = &zero_buf;
+                if (it != feat_index_.end()){
+                    ptr = &x[ static_cast<size_t>(it->second) ];
+                }
+                std::array<int64_t,2> dims{1,1};
+                inputs.emplace_back( Ort::Value::CreateTensor<float>(mem,
+                                        const_cast<float*>(ptr), 1, dims.data(), dims.size()) );
+            }
+        }
+
+        auto outs = mul_.Run(Ort::RunOptions{nullptr},
+                             in_names.data(), inputs.data(), inputs.size(),
+                             out_names.data(), out_names.size());
+
+        size_t nprob = 0;
+        const float* p = pick_prob_tensor(outs, nprob);
+        if (!p) throw std::runtime_error("multiclass.onnx: no float probability tensor in outputs");
+
+        argmax = 0; best = p[0];
+        float sum = p[0];
+        for (size_t i=1; i<nprob; ++i){
+            sum += p[i];
+            if (p[i] > best){ best = p[i]; argmax = static_cast<int>(i); }
+        }
+        normprob = (sum > 0.0f) ? (best / sum) : 0.0f;
     }
 
 private:
-    // ORT
-    Ort::Env env_;
-    std::unique_ptr<Ort::Session> bin_, mul_;
-
-    // meta
+    // Model + metadata
+    std::vector<std::string> feature_order_;
+    std::unordered_map<std::string,int> feat_index_;   // normalized name -> index
+    std::unordered_map<int,std::string> class_map_;
     int64_t n_features_{0};
-    float   thr_{0.5f};
-    std::unordered_map<std::string,int> feat_index_;
-    std::unordered_map<int,std::string>  class_map_;
-    inline static const float zero_{0.0f};
+    float   bin_threshold_{0.5f};
 
-    // binary I/O cache (shapes only)
-    size_t  bin_in_cnt_{0}, bin_out_cnt_{0};
-    bool    single_input_{true};
-    std::vector<int64_t> bin_vec_shape_;
-    std::vector<std::vector<int64_t>> bin_in_shapes_;
+    // ORT objects
+    Ort::Env           env_;
+    Ort::SessionOptions so_;
+    Ort::Session       bin_;
+    Ort::Session       mul_;
 
-    // multiclass I/O cache (shapes only)
-    size_t  mul_in_cnt_{0}, mul_out_cnt_{0};
-    bool    mul_single_input_{true};
-    std::vector<int64_t> mul_vec_shape_;
-    std::vector<std::vector<int64_t>> mul_in_shapes_;
+    // I/O cache
+    size_t bin_in_cnt_{0},  bin_out_cnt_{0};
+    size_t mul_in_cnt_{0},  mul_out_cnt_{0};
+    bool   single_input_bin_{true};
+    bool   single_input_mul_{true};
 };
