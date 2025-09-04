@@ -1,8 +1,8 @@
 #include "./include/BS_thread_pool.hpp"
 #include "./include/Interface.h"
 #include "./include/date.h"
-#include "./include/filter.h"
 #include "./include/packet.h"
+#include "./include/flow.h"
 #include "./include/tins/tins.h"
 
 #include <fstream>
@@ -25,6 +25,7 @@ using namespace Tins;
 using namespace BS;
 using namespace chrono;
 namespace fs = filesystem;
+using SteadyClock = std::chrono::steady_clock; 
 
 void sniff(NetworkConfig &conf);
 void parsePorts(const string &input, vector<string> &target);
@@ -156,126 +157,110 @@ void sniff(NetworkConfig &conf) {
   string currentTime = timeStamp();
   string currentPath = getPath();
   filesystem::create_directories(currentPath);
-  auto writer = make_unique<PacketWriter>(currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap", DataLinkType<EthernetII>());
+  auto writer = std::make_unique<PacketWriter>(
+      currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap",
+      DataLinkType<EthernetII>());
 
   // Capture Packet (Sniffer)
   SnifferConfiguration config;
   config.set_promisc_mode(true);
   Sniffer sniffer(conf.NAME, config);
-  unordered_map<string, Flow> flow_map;
+
+  std::unordered_map<string, Flow> flow_map;
 
   sniffer.sniff_loop([&](Packet &pkt) {
-    // Write logs
+    // roll pcap file per day
     string date = currentDate();
     string path = getPath();
     if (currentDay != date) {
       currentDay  = date;
       currentPath = path;
       filesystem::create_directories(currentPath);
-      writer = make_unique<PacketWriter>(currentPath + conf.NAME + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
+      writer = std::make_unique<PacketWriter>(
+          currentPath + conf.NAME + "-" + currentDay + ".pcap",
+          DataLinkType<EthernetII>());
     }
     writer->write(pkt);
 
-    // Filter
-    PDU *pdu = pkt.pdu();
-    string key;
-    if (pdu->find_pdu<IP>()) {
-      IP &ip = pdu->rfind_pdu<IP>();
-      key = ip.src_addr().to_string() + ";" + ip.dst_addr().to_string() + ";";
+    // ===== Parse with libtins =====
+    PDU* pdu = pkt.pdu();
+    if (!pdu) return true;
 
-      PacketInfo packet;
-      packet.protocol = "ip";
-      IPFilter(&packet, ip);
+    // รองรับ IPv4 (คุณจะขยายเป็น IPv6 ได้ภายหลัง)
+    const IP* ip = pdu->find_pdu<IP>();
+    if (!ip) return true; // ข้ามเฟรมที่ไม่ใช่ IPv4
 
-      if (pdu->find_pdu<TCP>()) {
-        TCP &tcp = pdu->rfind_pdu<TCP>();
-        key = key + to_string(tcp.sport()) + ";" + to_string(tcp.dport()) + ";";
-        packet.protocol = "tcp";
-        packet.tcp.emplace();
-        TCPFilter(&packet, tcp);
+    const auto now = SteadyClock::now(); // timestamp ณ ตอนรับแพ็กเก็ต
 
-        // HTTP Detection
-        if (tcp.sport() == 80 || tcp.dport() == 80 || tcp.sport() == 8080 || tcp.dport() == 8080 || tcp.sport() == 443 || tcp.dport() == 443) {
-          packet.protocol = "http";
-          packet.http.emplace();
-          HTTPFilter(&packet, tcp);
-        }
+    // flow key (ปรับได้ตามจริง เช่น รวมโปรโตคอล/พอร์ต)
+    const string src_str = ip->src_addr().to_string();
+    const string dst_str = ip->dst_addr().to_string();
+    const string key     = src_str + ";" + dst_str + ";";
 
-        // SSL/TLS Detection
-        if (tcp.sport() == 443 || tcp.dport() == 443) {
-          packet.ssl.emplace();
-          SSLFilter(&packet, tcp);
-        }
-        
-        // FTP Detection
-        if (tcp.sport() == 21 || tcp.dport() == 21 || tcp.sport() == 2021 || tcp.dport() == 2021) {
-          packet.protocol = "ftp";
-          packet.ftp.emplace();
-          FTPFilter(&packet, tcp);
-        }
-            
-        // SMTP Detection
-        if (tcp.sport() == 25 || tcp.dport() == 25 || tcp.sport() == 587 || tcp.dport() == 587 || tcp.sport() == 465 || tcp.dport() == 465) {
-          packet.protocol = "smtp";
-          packet.smtp.emplace();
-          SMTPFilter(&packet, tcp);
-        }
-        
-        // DCE/RPC Detection
-        if (tcp.sport() == 135 || tcp.dport() == 135) {
-          packet.dce.emplace();
-          DCEFilter(&packet, tcp);
-        }
-        
-      } else if (pdu->find_pdu<UDP>()) {
-        UDP &udp = pdu->rfind_pdu<UDP>();
-        key = key + to_string(udp.sport()) + ";" + to_string(udp.dport()) + ";";
-        packet.protocol = "udp";
-        packet.udp.emplace();
-        UDPFilter(&packet, udp);
-        
-        // SIP Detection
-        if (udp.sport() == 5060 || udp.dport() == 5060) {
-          packet.protocol = "sip";
-          packet.sip.emplace();
-          SIPFilter(&packet, udp);
-        }
-        
-      } else if (pdu->find_pdu<ICMP>()) {
-        ICMP &icmp = pdu->rfind_pdu<ICMP>();
-        packet.protocol = "icmp";
-        packet.icmp.emplace();
-        ICMPFilter(&packet, icmp);
-      }
+    Flow& flow = flow_map[key];
 
-      bool fwd;
-      if(ip.src_addr() != conf.IP){
-        fwd = true;
-      }else{
-        fwd = false;
-      }
-      
-      // Flow
-      Flow& flow = flow_map[key];
-      const int len = static_cast<int>(pdu->size());
-      const auto now = SteadyClock::now();
+    // ทิศทาง: src != server ⇒ FWD, src == server ⇒ BWD
+    const bool fwd = (src_str != conf.IP);
 
-      if (fwd) {
-        // Forward packet
-        flow.add_fwd_packet(now, len);
-      } else {
-        // Backward packet
-        flow.add_bwd_packet(now, len);
-      }
-      double dur_s = duration_sec(flow.first_ts, flow.last_ts);
-      if (dur_s > 0.0) {
-        flow.bytes_per_sec = (flow.total_fwd_length + flow.total_bwd_length) / dur_s;
-        flow.pkts_per_sec  = static_cast<double>(flow.total_fwd + flow.total_bwd) / dur_s;
-      } else {
-        flow.bytes_per_sec = 0.0;
-        flow.pkts_per_sec  = 0.0;
-      }
+    // ----- ค่าที่ใช้ทำฟีเจอร์ความยาว/เฮดเดอร์ -----
+    // L3 frame length (ให้สอดคล้องกับตอนเทรน): ip->size() = IP header + (L4 header + payload)
+    const int frame_len_l3 = static_cast<int>(ip->size());
+    const int ip_hdr_len   = static_cast<int>(ip->header_size());
 
+    bool is_tcp  = false;
+    bool is_udp  = false;
+    bool is_icmp = false;
+
+    bool syn=false, urg=false, psh=false;
+    int  win=0;
+    int  l4_hdr_len = 0;
+
+    // ----- ตรวจ TCP -----
+    if (const TCP* tcp = pdu->find_pdu<TCP>()) {
+      is_tcp = true;
+      // flags
+      const uint8_t flags = tcp->flags();
+      syn = (flags & TCP::SYN) != 0;
+      urg = (flags & TCP::URG) != 0;
+      psh = (flags & TCP::PSH) != 0;
+      // window
+      win = tcp->window();
+      // TCP header length
+      l4_hdr_len = static_cast<int>(tcp->header_size());
+
+      // อัปเดต TCP-เฉพาะ
+      flow.on_tcp_flags(syn, urg);
+      if (fwd) flow.set_init_win_bytes_fwd(win);
+      else     flow.set_init_win_bytes_bwd(win);
+    }
+    // ----- ตรวจ UDP -----
+    else if (const UDP* udp = pdu->find_pdu<UDP>()) {
+      is_udp = true;
+      l4_hdr_len = static_cast<int>(udp->header_size()); // ปกติ 8
+    }
+    // ----- ตรวจ ICMP -----
+    else if (const ICMP* icmp = pdu->find_pdu<ICMP>()) {
+      is_icmp = true;
+      l4_hdr_len = static_cast<int>(icmp->header_size()); // โดยทั่วไปราว 8
+    } else {
+      // โปรโตคอลอื่น: ใส่ l4_hdr_len = 0
+      l4_hdr_len = 0;
+    }
+
+    // payload length (เฉพาะถ้าคุณนิยาม "segment = payload" ตอนเทรน)
+    int payload_len = frame_len_l3 - (ip_hdr_len + l4_hdr_len);
+    if (payload_len < 0) payload_len = -1; // unknown/ไม่ใช้
+
+    // ----- เติมแพ็กเก็ตลง Flow -----
+    const int hdr_total = ip_hdr_len + l4_hdr_len;
+
+    if (fwd) {
+      // PSH มีเฉพาะ TCP
+      flow.add_fwd_packet(now, frame_len_l3, hdr_total, psh);
+      // เฉพาะถ้าคุณนิยาม segment=payload และเป็น FWD เท่านั้น
+      if (is_tcp && payload_len >= 0) flow.on_fwd_payload(payload_len);
+    } else {
+      flow.add_bwd_packet(now, frame_len_l3, hdr_total);
     }
     return true;
   });
