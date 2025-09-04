@@ -1,0 +1,82 @@
+ความหมายของแต่ละฟีเจอร์ (พร้อมวิธีคำนวณย่อ)
+
+0. Flow Duration (int64) — ระยะเวลาโฟลว์ = last_ts - first_ts (วินาทีหรือมิลลิวินาที ขึ้นกับสเกลที่คุณใช้)
+1. Total Fwd Packets (int32) — จำนวนแพ็กเก็ตฝั่ง FWD ทั้งหมดในโฟลว์
+2. Total Backward Packets (int32) — จำนวนแพ็กเก็ตฝั่ง BWD ทั้งหมด
+
+3. Fwd Packets Length Total (float64) — ผลรวมขนาดแพ็กเก็ตฝั่ง FWD (ไบต์)
+4. Bwd Packets Length Total (float64) — ผลรวมขนาดแพ็กเก็ตฝั่ง BWD (ไบต์)
+
+“ขนาดแพ็กเก็ต” ควรใช้ความยาวเฟรม/ไบต์ที่จับได้ให้ สอดคล้องกับตอนเทรน (มักรวม header ด้วย)
+
+5. Fwd Packet Length Max (float64) — ค่าสูงสุดของความยาวแพ็กเก็ตฝั่ง FWD
+6. Fwd Packet Length Mean (float32) — ค่าเฉลี่ยความยาวแพ็กเก็ตฝั่ง FWD
+7. Fwd Packet Length Std (float32) — ส่วนเบี่ยงเบนมาตรฐานความยาวแพ็กเก็ตฝั่ง FWD
+
+8. Bwd Packet Length Max (float64) — สูงสุดของความยาวแพ็กเก็ต BWD
+9. Bwd Packet Length Mean (float32) — เฉลี่ยความยาวแพ็กเก็ต BWD
+10. Bwd Packet Length Std (float32) — ส่วนเบี่ยงเบนมาตรฐานความยาวแพ็กเก็ต BWD
+
+11. Flow Bytes/s (float64) — อัตราไบต์ต่อวินาทีทั้งโฟลว์ = (FwdLenTotal + BwdLenTotal) / FlowDurationSec
+12. Flow Packets/s (float64) — อัตราแพ็กเก็ตต่อวินาทีทั้งโฟลว์ = (TotalFwdPkts + TotalBwdPkts) / FlowDurationSec
+
+13. Flow IAT Mean (float32) — ค่าเฉลี่ย IAT “รวมทุกทิศ” (คำนวณจากเวลาระหว่างแพ็กเก็ตติดกันทั้งโฟลว์)
+14. Flow IAT Std (float32) — ส่วนเบี่ยงเบนมาตรฐานของ Flow IAT
+15. Flow IAT Max (float64) — ค่า IAT สูงสุด
+16. Flow IAT Min (float64) — ค่า IAT ต่ำสุด
+
+17. Fwd IAT Total (float64) — ผลรวม IAT ของแพ็กเก็ตฝั่ง FWD (ผลรวมของช่องว่างเวลาเฉพาะทิศ FWD)
+18. Fwd IAT Mean (float32) — ค่าเฉลี่ย FWD IAT
+19. Fwd IAT Std (float32) — ส่วนเบี่ยงเบนมาตรฐาน FWD IAT
+20. Fwd IAT Max (float64) — ค่าสูงสุด FWD IAT
+21. Fwd IAT Min (float64) — ค่าต่ำสุด FWD IAT
+
+22. Bwd IAT Total (float64) — ผลรวม IAT ของแพ็กเก็ตฝั่ง BWD
+23. Bwd IAT Mean (float32) — ค่าเฉลี่ย BWD IAT
+24. Bwd IAT Std (float32) — ส่วนเบี่ยงเบนมาตรฐาน BWD IAT
+25. Bwd IAT Max (float64) — ค่าสูงสุด BWD IAT
+26. Bwd IAT Min (float64) — ค่าต่ำสุด BWD IAT
+
+27. Fwd PSH Flags (int8) — จำนวนแพ็กเก็ต FWD ที่มี TCP PSH=1
+28. Fwd Header Length (int64) — ผลรวมความยาว “ส่วนหัว” ของแพ็กเก็ต FWD (IP hdr + L4 hdr)
+29. Bwd Header Length (int64) — ผลรวมความยาวหัวแพ็กเก็ต BWD
+
+30. Fwd Packets/s (float32) — อัตราแพ็กเก็ต/วินาที FWD = TotalFwdPkts / FlowDurationSec
+31. Bwd Packets/s (float32) — อัตราแพ็กเก็ต/วินาที BWD = TotalBwdPkts / FlowDurationSec
+
+32. Packet Length Max (float64) — ค่าสูงสุดของความยาวแพ็กเก็ต “รวมทุกทิศ”
+33. Packet Length Mean (float32) — ค่าเฉลี่ยความยาวแพ็กเก็ต “รวมทุกทิศ”
+34. Packet Length Std (float32) — ส่วนเบี่ยงเบนมาตรฐานความยาวแพ็กเก็ต “รวมทุกทิศ”
+35. Packet Length Variance (float32) — ความแปรปรวนความยาวแพ็กเก็ต “รวมทุกทิศ”
+
+36. SYN Flag Count (int8) — จำนวนแพ็กเก็ตในโฟลว์ที่มี TCP SYN=1 (ทั้งสองทิศ)
+37. URG Flag Count (int8) — จำนวนแพ็กเก็ตที่มี TCP URG=1 (ทั้งสองทิศ)
+
+38. Avg Packet Size (float32) — ขนาดเฉลี่ยของแพ็กเก็ต “รวมทุกทิศ” = (FwdLenTotal + BwdLenTotal) / (TotalFwdPkts + TotalBwdPkts)
+39. Avg Fwd Segment Size (float32) — “ขนาดเฉลี่ยเซกเมนต์” ฝั่ง FWD; ในทางปฏิบัติมักเท่ากับ Fwd Packet Length Mean (หรือเฉลี่ย payload ของ TCP หากคุณใช้ “segment = payload”)
+40. Avg Bwd Segment Size (float32) — เช่นเดียวกับข้อ 39 แต่ทิศ BWD
+
+41. Subflow Fwd Packets (int32) — จำนวนแพ็กเก็ต FWD ต่อ “subflow” (โฟลว์ย่อยเมื่อ idle gap > threshold เช่น 1s)
+42. Subflow Fwd Bytes (int32) — ไบต์ FWD ต่อ subflow
+43. Subflow Bwd Packets (int32) — จำนวนแพ็กเก็ต BWD ต่อ subflow
+44. Subflow Bwd Bytes (int32) — ไบต์ BWD ต่อ subflow
+
+ถ้าคุณ “ไม่แบ่ง subflow” (ยังไม่ทำ idle segmentation) ให้ตั้ง 41–44 = ค่ารวมของทิศนั้น ๆ เป็น ค่าเริ่มต้นที่ใช้ได้จริง จนกว่าจะเพิ่ม logic subflow
+
+45. Init Fwd Win Bytes (int32) — ค่า TCP Window Size (bytes) ครั้งแรกที่พบในทิศ FWD
+46. Init Bwd Win Bytes (int32) — ค่า TCP Window Size ครั้งแรกที่พบในทิศ BWD
+
+สำหรับ UDP/ICMP ให้เป็น 0 (ไม่มีความหมาย)
+
+47. Fwd Act Data Packets (int32) — จำนวนแพ็กเก็ต FWD ที่มี “payload data > 0” (ไม่ใช่ pure ACK/SYN/FIN)
+48. Fwd Seg Size Min (int32) — ค่าต่ำสุดของขนาดเซกเมนต์ FWD (ถ้านิยามเซกเมนต์=payload ก็เป็น min payload bytes; ถ้านิยาม=packet ก็เป็น min packet length FWD—ควรให้ตรงกับตอนเทรน)
+
+49. Active Mean (float32) — ค่าเฉลี่ยช่วง “Active period” ของโฟลว์ (ช่วงที่ IAT ≤ idle_threshold ต่อเนื่อง)
+50. Active Std (float32) — ส่วนเบี่ยงเบนมาตรฐานของ Active period
+51. Active Max (float64) — ค่าสูงสุดของ Active period
+52. Active Min (float64) — ค่าต่ำสุดของ Active period
+
+53. Idle Mean (float32) — ค่าเฉลี่ยช่วง “Idle period” (ช่วงที่ IAT > idle_threshold ระหว่าง burst)
+54. Idle Std (float32) — ส่วนเบี่ยงเบนมาตรฐาน Idle period
+55. Idle Max (float64) — Idle period สูงสุด
+56. Idle Min (float64) — Idle period ต่ำสุด

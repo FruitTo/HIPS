@@ -2,7 +2,6 @@
 #include "./include/Interface.h"
 #include "./include/date.h"
 #include "./include/filter.h"
-#include "./include/flow_manager.h"
 #include "./include/packet.h"
 #include "./include/tins/tins.h"
 
@@ -19,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <thread>
+#include <map>
 
 using namespace std;
 using namespace Tins;
@@ -31,8 +31,10 @@ void parsePorts(const string &input, vector<string> &target);
 string join(const vector<string> &list, const string &sep);
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
 
-int main()
-{
+int main() {
+  // ONNX
+  // IDSContext ctx = ids_init("./artifacts");
+
   vector<string> interfaceName = getInterfaceName();
   vector<NetworkConfig> configuredInterfaces;
   thread_pool pool(interfaceName.size());
@@ -46,8 +48,7 @@ int main()
   mode = (modeInput == 'y' || modeInput == 'Y');
 
   // Config Interface
-  for (const string &iface : interfaceName)
-  {
+  for (const string &iface : interfaceName) {
     NetworkConfig conf;
     char yesno;
     string input;
@@ -59,25 +60,23 @@ int main()
 
     cout << "\nConfiguring services for interface: " << iface << "\n";
 
-    auto askService = [&](const string &name, optional<bool> &flag, vector<string> &ports)
-    {
+    auto askService = [&](const string &name, optional<bool> &flag, vector<string> &ports) {
       cout << name << " Service? [y/n]: ";
       cin >> yesno;
       cin.ignore(numeric_limits<streamsize>::max(), '\n');
       bool enabled = (yesno == 'y' || yesno == 'Y');
       flag = enabled;
-      if (enabled)
-      {
+      if (enabled) {
         cout << "Enter " << name << " port(s) (space separated): ";
         getline(cin, input);
         parsePorts(input, ports);
       }
     };
 
-    askService("HTTP", conf.HTTP_SERVERS, conf.HTTP_PORTS);
-    askService("SSH", conf.SSH_SERVERS, conf.SSH_PORTS);
-    askService("FTP", conf.FTP_SERVERS, conf.FTP_PORTS);
-    askService("Oracle", conf.SQL_SERVERS, conf.ORACLE_PORTS);
+    askService("HTTP",   conf.HTTP_SERVERS,   conf.HTTP_PORTS);
+    askService("SSH",    conf.SSH_SERVERS,    conf.SSH_PORTS);
+    askService("FTP",    conf.FTP_SERVERS,    conf.FTP_PORTS);
+    askService("Oracle", conf.SQL_SERVERS,    conf.ORACLE_PORTS);
     askService("TELNET", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
 
     configuredInterfaces.push_back(conf);
@@ -88,8 +87,7 @@ int main()
 
   // Create Snort Process
   pid_t pid = fork();
-  if (pid == 0)
-  {
+  if (pid == 0) {
     vector<char *> argv;
 
     argv.push_back(strdup("sudo"));
@@ -106,8 +104,7 @@ int main()
     argv.push_back(strdup("passive"));
 
     // Interface
-    for (const auto &ifn : interfaceName)
-    {
+    for (const auto &ifn : interfaceName) {
       argv.push_back(strdup("-i"));
       argv.push_back(strdup(ifn.c_str()));
     }
@@ -125,10 +122,8 @@ int main()
     argv.push_back(nullptr);
 
     cout << "[Snort command] ";
-    for (char *arg : argv)
-    {
-      if (arg != nullptr)
-        cout << arg << " ";
+    for (char *arg : argv) {
+      if (arg != nullptr) cout << arg << " ";
     }
     cout << endl;
 
@@ -137,38 +132,27 @@ int main()
     _exit(1);
   }
   // User for wait snort
-  //   else if (pid > 0)
+  // else if (pid > 0)
   // {
   //   int status;
   //   waitpid(pid, &status, 0);
   // }
 
-  for (NetworkConfig &conf : configuredInterfaces)
-  {
-    task.push_back(pool.submit_task([&conf]()
-                                    { sniff(conf); }));
+  // Sniffer
+  for (NetworkConfig &conf : configuredInterfaces) {
+    task.push_back(pool.submit_task([&conf]() { sniff(conf); }));
   }
 
-  for (auto &t : task)
-  {
+  for (auto &t : task) {
     t.wait();
   }
 
   return 0;
 }
 
-void sniff(NetworkConfig &conf)
-{
-  // Initial Flow Variable
-  static mutex mtx;
-  unordered_map<string, FlowEntry> flow_table;
-  uint16_t bloom_counters[ARRAY_SIZE] = {0};
-  uint64_t total_packets = 0;
-  uint64_t total_flows = 0;
-  auto last_cleanup = chrono::system_clock::now();
-
+void sniff(NetworkConfig &conf) {
   // Initial Log Variable
-  string currentDay = currentDate();
+  string currentDay  = currentDate();
   string currentTime = timeStamp();
   string currentPath = getPath();
   filesystem::create_directories(currentPath);
@@ -178,156 +162,149 @@ void sniff(NetworkConfig &conf)
   SnifferConfiguration config;
   config.set_promisc_mode(true);
   Sniffer sniffer(conf.NAME, config);
-  sniffer.sniff_loop([&](Packet &pkt)
-                     {
-        total_packets++;
+  unordered_map<string, Flow> flow_map;
 
-        // Check Flow Time Expire
-        auto now = chrono::system_clock::now();
-        if (now - last_cleanup > chrono::minutes(1)) {
-          cleanupExpiredFlows(flow_table);
-          last_cleanup = now;
+  sniffer.sniff_loop([&](Packet &pkt) {
+    // Write logs
+    string date = currentDate();
+    string path = getPath();
+    if (currentDay != date) {
+      currentDay  = date;
+      currentPath = path;
+      filesystem::create_directories(currentPath);
+      writer = make_unique<PacketWriter>(currentPath + conf.NAME + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
+    }
+    writer->write(pkt);
+
+    // Filter
+    PDU *pdu = pkt.pdu();
+    string key;
+    if (pdu->find_pdu<IP>()) {
+      IP &ip = pdu->rfind_pdu<IP>();
+      key = ip.src_addr().to_string() + ";" + ip.dst_addr().to_string() + ";";
+
+      PacketInfo packet;
+      packet.protocol = "ip";
+      IPFilter(&packet, ip);
+
+      if (pdu->find_pdu<TCP>()) {
+        TCP &tcp = pdu->rfind_pdu<TCP>();
+        key = key + to_string(tcp.sport()) + ";" + to_string(tcp.dport()) + ";";
+        packet.protocol = "tcp";
+        packet.tcp.emplace();
+        TCPFilter(&packet, tcp);
+
+        // HTTP Detection
+        if (tcp.sport() == 80 || tcp.dport() == 80 || tcp.sport() == 8080 || tcp.dport() == 8080 || tcp.sport() == 443 || tcp.dport() == 443) {
+          packet.protocol = "http";
+          packet.http.emplace();
+          HTTPFilter(&packet, tcp);
         }
 
-        // Write logs
-        string date = currentDate();
-        string path = getPath();
-        if (currentDay != date) {
-          currentDay = date;
-          currentPath = path;
-          filesystem::create_directories(currentPath);
-          writer = make_unique<PacketWriter>(currentPath + conf.NAME + "-" + currentDay + ".pcap", DataLinkType<EthernetII>());
+        // SSL/TLS Detection
+        if (tcp.sport() == 443 || tcp.dport() == 443) {
+          packet.ssl.emplace();
+          SSLFilter(&packet, tcp);
         }
-        writer->write(pkt);
         
-        // Filter
-        PDU *pdu = pkt.pdu();
-        if (pdu->find_pdu<IP>()) {
-          IP &ip = pdu->rfind_pdu<IP>();
-          PacketInfo packet;
-          packet.protocol = "ip";
-          IPFilter(&packet, ip);
-          if (packet.src_addr == *conf.HOME_NET &&
-              packet.dst_addr != *conf.HOME_NET) {
-            packet.flow.direction = FlowDirection::TO_CLIENT;
-          } else {
-            packet.flow.direction = FlowDirection::TO_SERVER;
-          }
-          if (pdu->find_pdu<TCP>()) {
-            TCP &tcp = pdu->rfind_pdu<TCP>();
-            packet.protocol = "tcp";
-            packet.tcp.emplace();
-            TCPFilter(&packet, tcp);
-            
-            if (packet.tcp->payload_size > 0) {
-              packet.flow.stream_mode = StreamMode::ONLY_STREAM;
-            } else {
-              packet.flow.stream_mode = StreamMode::NO_STREAM;
-            }
-            
-            // HTTP Detection
-            if (tcp.sport() == 80 || tcp.dport() == 80 || 
- tcp.sport() == 8080 || tcp.dport() == 8080 ||
- tcp.sport() == 443 || tcp.dport() == 443)  {
-              packet.protocol = "http";
-              packet.http.emplace();
-              HTTPFilter(&packet, tcp);
-            }
-            
-            // SSL/TLS Detection
-            if (tcp.sport() == 443 || tcp.dport() == 443) {
-              packet.ssl.emplace();
-              SSLFilter(&packet, tcp);
-            }
-            
-            // FTP Detection
-            if (tcp.sport() == 21 || tcp.dport() == 21 || 
- tcp.sport() == 2021 || tcp.dport() == 2021) {
-              packet.protocol = "ftp";
-              packet.ftp.emplace();
-              FTPFilter(&packet, tcp);
-            }
-            
-            // SMTP Detection
-            if (tcp.sport() == 25 || tcp.dport() == 25 ||
- tcp.sport() == 587 || tcp.dport() == 587 ||
- tcp.sport() == 465 || tcp.dport() == 465) {
-              packet.protocol = "smtp";
-              packet.smtp.emplace();
-              SMTPFilter(&packet, tcp);
-            }
-            
-            // DCE/RPC Detection
-            if (tcp.sport() == 135 || tcp.dport() == 135) {
-              packet.dce.emplace();
-              DCEFilter(&packet, tcp);
-            }
-            
-          } else if (pdu->find_pdu<UDP>()) {
-            UDP &udp = pdu->rfind_pdu<UDP>();
-            packet.protocol = "udp";
-            packet.udp.emplace();
-            UDPFilter(&packet, udp);
-            packet.flow.stream_mode = StreamMode::NO_STREAM;
-            
-            // SIP Detection
-            if (udp.sport() == 5060 || udp.dport() == 5060) {
-              packet.protocol = "sip";
-              packet.sip.emplace();
-              SIPFilter(&packet, udp);
-            }
-            
-          } else if (pdu->find_pdu<ICMP>()) {
-            ICMP &icmp = pdu->rfind_pdu<ICMP>();
-            packet.protocol = "icmp";
-            packet.icmp.emplace();
-            ICMPFilter(&packet, icmp);
-            packet.flow.stream_mode = StreamMode::NO_STREAM;
-          }
-          
-          // Flow
-          size_t flows_before = flow_table.size();
-          flowIdentication(&packet, &conf, flow_table, bloom_counters);
-          if (flow_table.size() > flows_before) {
-            total_flows++;
-          }
-
-          // cout << packet.src_addr << " -> " << packet.dst_addr << "[" << packet.protocol << "]" << endl;
+        // FTP Detection
+        if (tcp.sport() == 21 || tcp.dport() == 21 || tcp.sport() == 2021 || tcp.dport() == 2021) {
+          packet.protocol = "ftp";
+          packet.ftp.emplace();
+          FTPFilter(&packet, tcp);
         }
-        return true; });
+            
+        // SMTP Detection
+        if (tcp.sport() == 25 || tcp.dport() == 25 || tcp.sport() == 587 || tcp.dport() == 587 || tcp.sport() == 465 || tcp.dport() == 465) {
+          packet.protocol = "smtp";
+          packet.smtp.emplace();
+          SMTPFilter(&packet, tcp);
+        }
+        
+        // DCE/RPC Detection
+        if (tcp.sport() == 135 || tcp.dport() == 135) {
+          packet.dce.emplace();
+          DCEFilter(&packet, tcp);
+        }
+        
+      } else if (pdu->find_pdu<UDP>()) {
+        UDP &udp = pdu->rfind_pdu<UDP>();
+        key = key + to_string(udp.sport()) + ";" + to_string(udp.dport()) + ";";
+        packet.protocol = "udp";
+        packet.udp.emplace();
+        UDPFilter(&packet, udp);
+        
+        // SIP Detection
+        if (udp.sport() == 5060 || udp.dport() == 5060) {
+          packet.protocol = "sip";
+          packet.sip.emplace();
+          SIPFilter(&packet, udp);
+        }
+        
+      } else if (pdu->find_pdu<ICMP>()) {
+        ICMP &icmp = pdu->rfind_pdu<ICMP>();
+        packet.protocol = "icmp";
+        packet.icmp.emplace();
+        ICMPFilter(&packet, icmp);
+      }
+
+      bool fwd;
+      if(ip.src_addr() != conf.IP){
+        fwd = true;
+      }else{
+        fwd = false;
+      }
+      
+      // Flow
+      Flow& flow = flow_map[key];
+      const int len = static_cast<int>(pdu->size());
+      const auto now = SteadyClock::now();
+
+      if (fwd) {
+        // Forward packet
+        flow.add_fwd_packet(now, len);
+      } else {
+        // Backward packet
+        flow.add_bwd_packet(now, len);
+      }
+      double dur_s = duration_sec(flow.first_ts, flow.last_ts);
+      if (dur_s > 0.0) {
+        flow.bytes_per_sec = (flow.total_fwd_length + flow.total_bwd_length) / dur_s;
+        flow.pkts_per_sec  = static_cast<double>(flow.total_fwd + flow.total_bwd) / dur_s;
+      } else {
+        flow.bytes_per_sec = 0.0;
+        flow.pkts_per_sec  = 0.0;
+      }
+
+    }
+    return true;
+  });
 }
 
-void parsePorts(const string &input, vector<string> &target)
-{
+void parsePorts(const string &input, vector<string> &target) {
   istringstream iss(input);
   string port;
-  while (iss >> port)
-    target.push_back(port);
+  while (iss >> port) target.push_back(port);
 }
 
-string join(const vector<string> &list, const string &sep)
-{
+string join(const vector<string> &list, const string &sep) {
   string out;
-  for (size_t i = 0; i < list.size(); ++i)
-  {
+  for (size_t i = 0; i < list.size(); ++i) {
     out += list[i];
-    if (i != list.size() - 1)
-      out += sep;
+    if (i != list.size() - 1) out += sep;
   }
   return out;
 }
 
-void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
-{
+void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   namespace fs = filesystem;
   auto root = fs::current_path();
-  auto cfg = root / "config" / "snort.lua";
+  auto cfg  = root / "config" / "snort.lua";
   auto logs = root / "snort_logs";
   fs::create_directories(logs);
 
   ofstream out(cfg);
-  if (!out)
-  {
+  if (!out) {
     cerr << "Failed to open " << cfg << " for writing.\n";
     return;
   }
@@ -350,43 +327,36 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   bool need_ssh = false;
 
   // Check need protocol
-  for (const auto &nc : configuredInterfaces)
-  {
+  for (const auto &nc : configuredInterfaces) {
     home_ips.insert("'" + nc.IP + "'");
-    if (nc.HTTP_SERVERS.value_or(false))
-    {
+    if (nc.HTTP_SERVERS.value_or(false)) {
       need_http = true;
       http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
     }
 
-    if (nc.TELNET_SERVERS.value_or(false))
-    {
+    if (nc.TELNET_SERVERS.value_or(false)) {
       need_telnet = true;
       file_ports.insert(nc.FILE_DATA_PORTS.begin(), nc.FILE_DATA_PORTS.end());
     }
 
-    if (nc.FTP_SERVERS.value_or(false))
-    {
+    if (nc.FTP_SERVERS.value_or(false)) {
       need_ftp = true;
       ftp_ports.insert(nc.FTP_PORTS.begin(), nc.FTP_PORTS.end());
     }
 
-    if (nc.SQL_SERVERS.value_or(false))
-    {
+    if (nc.SQL_SERVERS.value_or(false)) {
       need_sql = true;
       oracle_ports.insert(nc.ORACLE_PORTS.begin(), nc.ORACLE_PORTS.end());
     }
 
-    if (nc.SSH_SERVERS.value_or(false))
-    {
+    if (nc.SSH_SERVERS.value_or(false)) {
       need_ssh = true;
       ssh_ports.insert(nc.SSH_PORTS.begin(), nc.SSH_PORTS.end());
     }
   }
 
   // HTTP
-  if (need_http && !http_ports.empty())
-  {
+  if (need_http && !http_ports.empty()) {
     // out << "http_inspect = {\n"
     //        "  request_depth = -1,\n"
     //        "  response_depth = -1,\n"
@@ -396,10 +366,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 
     ostringstream ip_list;
     bool first = true;
-    for (const auto &ip : home_ips)
-    {
-      if (!first)
-        ip_list << ", ";
+    for (const auto &ip : home_ips) {
+      if (!first) ip_list << ", ";
       ip_list << ip;
       first = false;
     }
@@ -407,10 +375,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
 
     ostringstream port_list;
     first = true;
-    for (const auto &port : http_ports)
-    {
-      if (!first)
-        port_list << " ";
+    for (const auto &port : http_ports) {
+      if (!first) port_list << " ";
       port_list << port;
       first = false;
     }
@@ -422,14 +388,11 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
 
   // Telnet
-  if (need_telnet && !file_ports.empty())
-  {
+  if (need_telnet && !file_ports.empty()) {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : file_ports)
-    {
-      if (!first)
-        port_list << " ";
+    for (const auto &port : file_ports) {
+      if (!first) port_list << " ";
       port_list << port;
       first = false;
     }
@@ -437,14 +400,11 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
 
   // FTP
-  if (need_ftp && !ftp_ports.empty())
-  {
+  if (need_ftp && !ftp_ports.empty()) {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : ftp_ports)
-    {
-      if (!first)
-        port_list << " ";
+    for (const auto &port : ftp_ports) {
+      if (!first) port_list << " ";
       port_list << port;
       first = false;
     }
@@ -452,30 +412,23 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
 
   // SQL
-  if (need_sql && !oracle_ports.empty())
-  {
+  if (need_sql && !oracle_ports.empty()) {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : oracle_ports)
-    {
-      if (!first)
-        port_list << " ";
+    for (const auto &port : oracle_ports) {
+      if (!first) port_list << " ";
       port_list << port;
       first = false;
     }
     out << "ORACLE_PORTS = '" << port_list.str() << "'\n";
   }
 
-
   // SSH
-  if (need_ssh && !ssh_ports.empty())
-  {
+  if (need_ssh && !ssh_ports.empty()) {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : ssh_ports)
-    {
-      if (!first)
-        port_list << " ";
+    for (const auto &port : ssh_ports) {
+      if (!first) port_list << " ";
       port_list << port;
       first = false;
     }
@@ -483,27 +436,19 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   }
 
   // HOME_NET
-  if (home_ips.size() > 1)
-  {
+  if (home_ips.size() > 1) {
     out << "HOME_NET = { ";
     bool first = true;
-    for (auto &ip : home_ips)
-    {
-      if (!first)
-        out << ", ";
+    for (auto &ip : home_ips) {
+      if (!first) out << ", ";
       out << ip;
       first = false;
     }
     out << " }\n";
-  }
-  else
-  {
-    if (!home_ips.empty())
-    {
+  } else {
+    if (!home_ips.empty()) {
       out << "HOME_NET = " << *home_ips.begin() << "\n";
-    }
-    else
-    {
+    } else {
       out << "HOME_NET = 'any'\n";
     }
   }
@@ -540,103 +485,102 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   out << "include 'snort_defaults.lua'\n";
 
   out << "stream = { }\n"
-      << "stream_ip = { }\n"
-      << "stream_icmp = { }\n"
-      << "stream_tcp = { }\n"
-      << "stream_udp = { }\n"
-      << "stream_user = { }\n"
-      << "stream_file = { }\n\n"
+         "stream_ip = { }\n"
+         "stream_icmp = { }\n"
+         "stream_tcp = { }\n"
+         "stream_udp = { }\n"
+         "stream_user = { }\n"
+         "stream_file = { }\n\n"
 
-      << "arp_spoof = { }\n"
-      << "back_orifice = { }\n"
-      << "dns = { }\n"
-      << "imap = { }\n"
-      << "netflow = { }\n"
-      << "normalizer = { }\n"
-      << "pop = { }\n"
-      << "rpc_decode = { }\n"
-      << "sip = { }\n"
-      << "ssh = { }\n"
-      << "ssl = { }\n"
-      << "telnet = { }\n\n"
+         "arp_spoof = { }\n"
+         "back_orifice = { }\n"
+         "dns = { }\n"
+         "imap = { }\n"
+         "netflow = { }\n"
+         "normalizer = { }\n"
+         "pop = { }\n"
+         "rpc_decode = { }\n"
+         "sip = { }\n"
+         "ssh = { }\n"
+         "ssl = { }\n"
+         "telnet = { }\n\n"
 
-      << "cip = { }\n"
-      << "dnp3 = { }\n"
-      << "iec104 = { }\n"
-      << "mms = { }\n"
-      << "modbus = { }\n"
-      << "s7commplus = { }\n\n"
+         "cip = { }\n"
+         "dnp3 = { }\n"
+         "iec104 = { }\n"
+         "mms = { }\n"
+         "modbus = { }\n"
+         "s7commplus = { }\n\n"
 
-      << "dce_smb = { }\n"
-      << "dce_tcp = { }\n"
-      << "dce_udp = { }\n"
-      << "dce_http_proxy = { }\n"
-      << "dce_http_server = { }\n\n"
+         "dce_smb = { }\n"
+         "dce_tcp = { }\n"
+         "dce_udp = { }\n"
+         "dce_http_proxy = { }\n"
+         "dce_http_server = { }\n\n"
 
-      << "gtp_inspect = default_gtp\n"
-      << "port_scan = default_med_port_scan\n"
-      << "smtp = default_smtp\n\n"
+         "gtp_inspect = default_gtp\n"
+         "port_scan = default_med_port_scan\n"
+         "smtp = default_smtp\n\n"
 
-      << "ftp_server = default_ftp_server\n"
-      << "ftp_client = { }\n"
-      << "ftp_data = { }\n\n"
+         "ftp_server = default_ftp_server\n"
+         "ftp_client = { }\n"
+         "ftp_data = { }\n\n"
 
-      << "http_inspect = { }\n"
-      << "http2_inspect = { }\n\n"
+         "http_inspect = { }\n"
+         "http2_inspect = { }\n\n"
 
-      << "js_norm = default_js_norm\n\n"
+         "js_norm = default_js_norm\n\n"
 
-      << "wizard = default_wizard\n\n"
+         "wizard = default_wizard\n\n"
 
-      << "binder = {\n"
-      << "    { when = { proto = 'udp', ports = '53', role='server' },  use = { type = 'dns' } },\n"
-      << "    { when = { proto = 'tcp', ports = '53', role='server' },  use = { type = 'dns' } },\n"
-      << "    { when = { proto = 'tcp', ports = '111', role='server' }, use = { type = 'rpc_decode' } },\n"
-      << "    { when = { proto = 'tcp', ports = '502', role='server' }, use = { type = 'modbus' } },\n"
-      << "    { when = { proto = 'tcp', ports = '2123 2152 3386', role='server' }, use = { type = 'gtp_inspect' } },\n"
-      << "    { when = { proto = 'tcp', ports = '2404', role='server' }, use = { type = 'iec104' } },\n"
-      << "    { when = { proto = 'udp', ports = '2222', role = 'server' }, use = { type = 'cip' } },\n"
-      << "    { when = { proto = 'tcp', ports = '44818', role = 'server' }, use = { type = 'cip' } },\n\n"
-      << "    { when = { proto = 'tcp', service = 'dcerpc' },  use = { type = 'dce_tcp' } },\n"
-      << "    { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },\n"
-      << "    { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },\n\n";
-  if (need_http && !http_ports.empty())
-  {
+         "binder = {\n"
+         "    { when = { proto = 'udp', ports = '53', role='server' },  use = { type = 'dns' } },\n"
+         "    { when = { proto = 'tcp', ports = '53', role='server' },  use = { type = 'dns' } },\n"
+         "    { when = { proto = 'tcp', ports = '111', role='server' }, use = { type = 'rpc_decode' } },\n"
+         "    { when = { proto = 'tcp', ports = '502', role='server' }, use = { type = 'modbus' } },\n"
+         "    { when = { proto = 'tcp', ports = '2123 2152 3386', role='server' }, use = { type = 'gtp_inspect' } },\n"
+         "    { when = { proto = 'tcp', ports = '2404', role='server' }, use = { type = 'iec104' } },\n"
+         "    { when = { proto = 'udp', ports = '2222', role = 'server' }, use = { type = 'cip' } },\n"
+         "    { when = { proto = 'tcp', ports = '44818', role = 'server' }, use = { type = 'cip' } },\n\n"
+         "    { when = { proto = 'tcp', service = 'dcerpc' },  use = { type = 'dce_tcp' } },\n"
+         "    { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },\n"
+         "    { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },\n\n";
+
+  if (need_http && !http_ports.empty()) {
     vector<string> ports_vec(http_ports.begin(), http_ports.end());
     string ports_list = join(ports_vec, " "); // เช่น "8000 8080"
-
     out << "    { when = { proto = 'tcp', ports = \"" << ports_list
         << "\", role = 'server' }, use = { type = 'http_inspect' } },\n";
   }
 
   out << "    { when = { service = 'netbios-ssn' },      use = { type = 'dce_smb' } },\n"
-      << "    { when = { service = 'dce_http_server' },  use = { type = 'dce_http_server' } },\n"
-      << "    { when = { service = 'dce_http_proxy' },   use = { type = 'dce_http_proxy' } },\n\n"
-      << "    { when = { service = 'cip' },              use = { type = 'cip' } },\n"
-      << "    { when = { service = 'dnp3' },             use = { type = 'dnp3' } },\n"
-      << "    { when = { service = 'dns' },              use = { type = 'dns' } },\n"
-      << "    { when = { service = 'ftp' },              use = { type = 'ftp_server' } },\n"
-      << "    { when = { service = 'ftp-data' },         use = { type = 'ftp_data' } },\n"
-      << "    { when = { service = 'gtp' },              use = { type = 'gtp_inspect' } },\n"
-      << "    { when = { service = 'imap' },             use = { type = 'imap' } },\n"
-      << "    { when = { service = 'http' },             use = { type = 'http_inspect' } },\n"
-      << "    { when = { service = 'http2' },            use = { type = 'http2_inspect' } },\n"
-      << "    { when = { service = 'iec104' },           use = { type = 'iec104' } },\n"
-      << "    { when = { service = 'mms' },              use = { type = 'mms' } },\n"
-      << "    { when = { service = 'modbus' },           use = { type = 'modbus' } },\n"
-      << "    { when = { service = 'pop3' },             use = { type = 'pop' } },\n"
-      << "    { when = { service = 'ssh' },              use = { type = 'ssh' } },\n"
-      << "    { when = { service = 'sip' },              use = { type = 'sip' } },\n"
-      << "    { when = { service = 'smtp' },             use = { type = 'smtp' } },\n"
-      << "    { when = { service = 'ssl' },              use = { type = 'ssl' } },\n"
-      << "    { when = { service = 'sunrpc' },           use = { type = 'rpc_decode' } },\n"
-      << "    { when = { service = 's7commplus' },       use = { type = 's7commplus' } },\n"
-      << "    { when = { service = 'telnet' },           use = { type = 'telnet' } },\n\n"
-      << "    { use = { type = 'wizard' } }\n"
-      << "}\n\n"
+         "    { when = { service = 'dce_http_server' },  use = { type = 'dce_http_server' } },\n"
+         "    { when = { service = 'dce_http_proxy' },   use = { type = 'dce_http_proxy' } },\n\n"
+         "    { when = { service = 'cip' },              use = { type = 'cip' } },\n"
+         "    { when = { service = 'dnp3' },             use = { type = 'dnp3' } },\n"
+         "    { when = { service = 'dns' },              use = { type = 'dns' } },\n"
+         "    { when = { service = 'ftp' },              use = { type = 'ftp_server' } },\n"
+         "    { when = { service = 'ftp-data' },         use = { type = 'ftp_data' } },\n"
+         "    { when = { service = 'gtp' },              use = { type = 'gtp_inspect' } },\n"
+         "    { when = { service = 'imap' },             use = { type = 'imap' } },\n"
+         "    { when = { service = 'http' },             use = { type = 'http_inspect' } },\n"
+         "    { when = { service = 'http2' },            use = { type = 'http2_inspect' } },\n"
+         "    { when = { service = 'iec104' },           use = { type = 'iec104' } },\n"
+         "    { when = { service = 'mms' },              use = { type = 'mms' } },\n"
+         "    { when = { service = 'modbus' },           use = { type = 'modbus' } },\n"
+         "    { when = { service = 'pop3' },             use = { type = 'pop' } },\n"
+         "    { when = { service = 'ssh' },              use = { type = 'ssh' } },\n"
+         "    { when = { service = 'sip' },              use = { type = 'sip' } },\n"
+         "    { when = { service = 'smtp' },             use = { type = 'smtp' } },\n"
+         "    { when = { service = 'ssl' },              use = { type = 'ssl' } },\n"
+         "    { when = { service = 'sunrpc' },           use = { type = 'rpc_decode' } },\n"
+         "    { when = { service = 's7commplus' },       use = { type = 's7commplus' } },\n"
+         "    { when = { service = 'telnet' },           use = { type = 'telnet' } },\n\n"
+         "    { use = { type = 'wizard' } }\n"
+         "}\n\n"
 
-      << "references = default_references\n"
-      << "classifications = default_classifications\n";
+         "references = default_references\n"
+         "classifications = default_classifications\n";
 
   // DAQ
   out << "daq_module = 'afpacket'\n";
@@ -646,31 +590,16 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   out << "ips = {\n";
   out << "  rules = [[\n";
   out << "    include " << (root / "rules" / "default.rules").string() << "\n";
-  if (need_http)
-  {
-    out << "    include " << (root / "rules" / "http.rules").string() << "\n";
-  }
-  if (need_telnet)
-  {
-    out << "    include " << (root / "rules" / "telnet.rules").string() << "\n";
-  }
-  if (need_sql)
-  {
-    out << "    include " << (root / "rules" / "sql.rules").string() << "\n";
-  }
-  if (need_ssh)
-  {
-    out << "    include " << (root / "rules" / "ssh.rules").string() << "\n";
-  }
-  if (need_ftp)
-  {
-    out << "    include " << (root / "rules" / "ftp.rules").string() << "\n";
-  }
+  if (need_http)   { out << "    include " << (root / "rules" / "http.rules").string()   << "\n"; }
+  if (need_telnet) { out << "    include " << (root / "rules" / "telnet.rules").string() << "\n"; }
+  if (need_sql)    { out << "    include " << (root / "rules" / "sql.rules").string()    << "\n"; }
+  if (need_ssh)    { out << "    include " << (root / "rules" / "ssh.rules").string()    << "\n"; }
+  if (need_ftp)    { out << "    include " << (root / "rules" / "ftp.rules").string()    << "\n"; }
   out << "  ]],\n";
   out << "  mode = '" << (mode ? "inline" : "tap") << "',\n"
-      << "  enable_builtin_rules = false,\n"
-      << "  variables = default_variables,\n"
-      << "}\n\n";
+         "  enable_builtin_rules = false,\n"
+         "  variables = default_variables,\n"
+         "}\n\n";
 
   // Logging
   out << "alert_json = {\n"
@@ -682,8 +611,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
   out << "pkt_logger = { file=true, limit=1000 }\n\n";
 
   out << "if ( tweaks ~= nil ) then\n"
-      << "    include(tweaks .. '.lua')\n"
-      << "end\n";
+         "    include(tweaks .. '.lua')\n"
+         "end\n";
 
   out.close();
 }

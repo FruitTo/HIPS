@@ -165,8 +165,6 @@ struct PacketInfo {
   std::optional<DCEInfo> dce;
   std::optional<FTPInfo> ftp;
   std::optional<SMTPInfo> smtp;
-
-  FlowInfo flow;
 };
 
 #endif

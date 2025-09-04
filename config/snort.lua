@@ -1,7 +1,5 @@
-HTTP_SERVERS = { '192.168.1.121' }
-HTTP_PORTS = '8080'
-FILE_DATA_PORTS = HTTP_PORTS ..  '143 110'
-HOME_NET = '192.168.1.121'
+FILE_DATA_PORTS = '143 110'
+HOME_NET = '192.168.1.77'
 EXTERNAL_NET = 'any'
 
 include 'snort_defaults.lua'
@@ -68,7 +66,6 @@ binder = {
     { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },
     { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },
 
-    { when = { proto = 'tcp', ports = "8080", role = 'server' }, use = { type = 'http_inspect' } },
     { when = { service = 'netbios-ssn' },      use = { type = 'dce_smb' } },
     { when = { service = 'dce_http_server' },  use = { type = 'dce_http_server' } },
     { when = { service = 'dce_http_proxy' },   use = { type = 'dce_http_proxy' } },
@@ -104,8 +101,6 @@ daq_mode = 'passive'
 ips = {
   rules = [[
     include /home/fruitto/Project/HIPS/rules/default.rules
-    include /home/fruitto/Project/HIPS/rules/http.rules
-    include /home/fruitto/Project/HIPS/rules/emerging.rules/rules/emerging-activex.rules
   ]],
   mode = 'tap',
   enable_builtin_rules = false,
