@@ -4,6 +4,7 @@
 #include "./include/packet.h"
 #include "./include/flow.h"
 #include "./include/tins/tins.h"
+#include "./include/ids_api.h"
 
 #include <fstream>
 #include <chrono>
@@ -19,13 +20,14 @@
 #include <sys/wait.h>
 #include <thread>
 #include <map>
+#include <netinet/in.h> 
 
 using namespace std;
 using namespace Tins;
 using namespace BS;
 using namespace chrono;
 namespace fs = filesystem;
-using SteadyClock = std::chrono::steady_clock; 
+using SteadyClock = chrono::steady_clock; 
 
 void sniff(NetworkConfig &conf);
 void parsePorts(const string &input, vector<string> &target);
@@ -153,115 +155,207 @@ int main() {
 
 void sniff(NetworkConfig &conf) {
   // Initial Log Variable
-  string currentDay  = currentDate();
-  string currentTime = timeStamp();
-  string currentPath = getPath();
-  filesystem::create_directories(currentPath);
+  std::string currentDay  = currentDate();
+  std::string currentTime = timeStamp();
+  std::string currentPath = getPath();
+  std::filesystem::create_directories(currentPath);
   auto writer = std::make_unique<PacketWriter>(
       currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap",
       DataLinkType<EthernetII>());
 
-  // Capture Packet (Sniffer)
-  SnifferConfiguration config;
-  config.set_promisc_mode(true);
-  Sniffer sniffer(conf.NAME, config);
+  // Sniffer
+  SnifferConfiguration cfg;
+  cfg.set_promisc_mode(true);
+  Sniffer sniffer(conf.NAME, cfg);
 
-  std::unordered_map<string, Flow> flow_map;
+  // ONNX
+  IDSContext ctx = ids_init("./artifacts");
+
+  // Flow Variable
+  std::unordered_map<std::string, FlowState> flow_map;
+  using SteadyClock = std::chrono::steady_clock;
+  using namespace std::chrono;
+  const auto t0 = SteadyClock::now();
+
+  // idle thresholds
+  static constexpr double UDP_IDLE_SEC = 1.0;   // close UDP flow after 1s idle
+  static constexpr double TCP_IDLE_SEC = 60.0;  // close TCP flow after 60s idle
 
   sniffer.sniff_loop([&](Packet &pkt) {
-    // roll pcap file per day
-    string date = currentDate();
-    string path = getPath();
+    // --- Rotate PCAP daily (ใช้รูปแบบไฟล์เดียวกันทุกครั้ง) ---
+    std::string date = currentDate();
+    std::string path = getPath();
     if (currentDay != date) {
       currentDay  = date;
       currentPath = path;
-      filesystem::create_directories(currentPath);
+      std::filesystem::create_directories(currentPath);
+      std::string ts = timeStamp();
       writer = std::make_unique<PacketWriter>(
-          currentPath + conf.NAME + "-" + currentDay + ".pcap",
+          currentPath + conf.NAME + "_" + currentDay + "_" + ts + ".pcap",
           DataLinkType<EthernetII>());
     }
     writer->write(pkt);
 
-    // ===== Parse with libtins =====
+    // --- Parse L3 (IPv4/IPv6) + L4 ---
     PDU* pdu = pkt.pdu();
     if (!pdu) return true;
 
-    // รองรับ IPv4 (คุณจะขยายเป็น IPv6 ได้ภายหลัง)
-    const IP* ip = pdu->find_pdu<IP>();
-    if (!ip) return true; // ข้ามเฟรมที่ไม่ใช่ IPv4
+    const IP*   ip4 = pdu->find_pdu<IP>();
+    const IPv6* ip6 = ip4 ? nullptr : pdu->find_pdu<IPv6>();
+    if (!ip4 && !ip6) return true;
 
-    const auto now = SteadyClock::now(); // timestamp ณ ตอนรับแพ็กเก็ต
+    // โปรโตคอล L4
+    uint8_t proto = 0; // 6=TCP, 17=UDP, 58=ICMPv6, 1=ICMP
+    int frame_len_l3 = 0;
+    int ip_hdr_len   = 0;
+    std::string src_str, dst_str;
 
-    // flow key (ปรับได้ตามจริง เช่น รวมโปรโตคอล/พอร์ต)
-    const string src_str = ip->src_addr().to_string();
-    const string dst_str = ip->dst_addr().to_string();
-    const string key     = src_str + ";" + dst_str + ";";
-
-    Flow& flow = flow_map[key];
-
-    // ทิศทาง: src != server ⇒ FWD, src == server ⇒ BWD
-    const bool fwd = (src_str != conf.IP);
-
-    // ----- ค่าที่ใช้ทำฟีเจอร์ความยาว/เฮดเดอร์ -----
-    // L3 frame length (ให้สอดคล้องกับตอนเทรน): ip->size() = IP header + (L4 header + payload)
-    const int frame_len_l3 = static_cast<int>(ip->size());
-    const int ip_hdr_len   = static_cast<int>(ip->header_size());
-
-    bool is_tcp  = false;
-    bool is_udp  = false;
-    bool is_icmp = false;
-
-    bool syn=false, urg=false, psh=false;
-    int  win=0;
-    int  l4_hdr_len = 0;
-
-    // ----- ตรวจ TCP -----
-    if (const TCP* tcp = pdu->find_pdu<TCP>()) {
-      is_tcp = true;
-      // flags
-      const uint8_t flags = tcp->flags();
-      syn = (flags & TCP::SYN) != 0;
-      urg = (flags & TCP::URG) != 0;
-      psh = (flags & TCP::PSH) != 0;
-      // window
-      win = tcp->window();
-      // TCP header length
-      l4_hdr_len = static_cast<int>(tcp->header_size());
-
-      // อัปเดต TCP-เฉพาะ
-      flow.on_tcp_flags(syn, urg);
-      if (fwd) flow.set_init_win_bytes_fwd(win);
-      else     flow.set_init_win_bytes_bwd(win);
+    if (ip4) {
+      proto        = ip4->protocol();
+      frame_len_l3 = static_cast<int>(ip4->size());
+      ip_hdr_len   = static_cast<int>(ip4->header_size());
+      src_str      = ip4->src_addr().to_string();
+      dst_str      = ip4->dst_addr().to_string();
+    } else { // IPv6
+      proto        = ip6->next_header();
+      frame_len_l3 = static_cast<int>(ip6->size());
+      ip_hdr_len   = static_cast<int>(ip6->header_size());
+      src_str      = ip6->src_addr().to_string();
+      dst_str      = ip6->dst_addr().to_string();
     }
-    // ----- ตรวจ UDP -----
-    else if (const UDP* udp = pdu->find_pdu<UDP>()) {
-      is_udp = true;
-      l4_hdr_len = static_cast<int>(udp->header_size()); // ปกติ 8
+
+    uint16_t sport = 0, dport = 0;
+    const TCP* tcp = pdu->find_pdu<TCP>();
+    const UDP* udp = (!tcp) ? pdu->find_pdu<UDP>() : nullptr;
+    const bool is_tcp = (tcp != nullptr);
+
+    if (tcp) { sport = tcp->sport(); dport = tcp->dport(); }
+    else if (udp) { sport = udp->sport(); dport = udp->dport(); }
+
+    // ใช้ ICMP/ICMPv6 สำหรับคำนวณ L4 header
+    const ICMP*   icmp4 = (!tcp && !udp) ? pdu->find_pdu<ICMP>()   : nullptr;
+    const ICMPv6* icmp6 = (!tcp && !udp && !icmp4) ? pdu->find_pdu<ICMPv6>() : nullptr;
+
+    const std::string key =
+        std::to_string(proto) + "|" + src_str + ":" + std::to_string(sport) +
+        "->" + dst_str + ":" + std::to_string(dport);
+
+    FlowState& flow = flow_map[key];
+    if (!flow.started) {
+      flow_init(flow);
     }
-    // ----- ตรวจ ICMP -----
-    else if (const ICMP* icmp = pdu->find_pdu<ICMP>()) {
-      is_icmp = true;
-      l4_hdr_len = static_cast<int>(icmp->header_size()); // โดยทั่วไปราว 8
+
+    // ทิศทาง FWD: ให้ "แพ็กเก็ตที่ออกจากเครื่องนี้" เป็น FWD
+    const bool is_fwd = (src_str == conf.IP);
+
+    const auto  now_tp = SteadyClock::now();
+    const double ts_sec = duration_cast<nanoseconds>(now_tp - t0).count() / 1e9;
+
+    // L4 header size
+    uint8_t tcp_flags_byte = 0;
+    int     tcp_window     = 0;
+    int     l4_hdr_len     = 0;
+
+    if (tcp) {
+      // ใช้ API ของ libtins แทนแมสก์ดิบ
+      tcp_flags_byte = tcp->flags();
+      tcp_window     = tcp->window();
+      l4_hdr_len     = static_cast<int>(tcp->header_size());
+    } else if (udp) {
+      l4_hdr_len = static_cast<int>(udp->header_size()); // 8 bytes
+    } else if (icmp4) {
+      l4_hdr_len = static_cast<int>(icmp4->header_size()); // ~8
+    } else if (icmp6) {
+      l4_hdr_len = static_cast<int>(icmp6->header_size()); // ~8
     } else {
-      // โปรโตคอลอื่น: ใส่ l4_hdr_len = 0
       l4_hdr_len = 0;
     }
 
-    // payload length (เฉพาะถ้าคุณนิยาม "segment = payload" ตอนเทรน)
     int payload_len = frame_len_l3 - (ip_hdr_len + l4_hdr_len);
-    if (payload_len < 0) payload_len = -1; // unknown/ไม่ใช้
+    if (payload_len < 0) payload_len = 0;
 
-    // ----- เติมแพ็กเก็ตลง Flow -----
-    const int hdr_total = ip_hdr_len + l4_hdr_len;
+    flow_add_packet(
+        flow,
+        is_fwd,
+        ts_sec,
+        static_cast<int32_t>(frame_len_l3),
+        static_cast<int32_t>(ip_hdr_len),
+        static_cast<int32_t>(l4_hdr_len),
+        is_tcp,
+        tcp_flags_byte,
+        static_cast<int32_t>(tcp_window),
+        static_cast<int32_t>(payload_len)
+    );
 
-    if (fwd) {
-      // PSH มีเฉพาะ TCP
-      flow.add_fwd_packet(now, frame_len_l3, hdr_total, psh);
-      // เฉพาะถ้าคุณนิยาม segment=payload และเป็น FWD เท่านั้น
-      if (is_tcp && payload_len >= 0) flow.on_fwd_payload(payload_len);
-    } else {
-      flow.add_bwd_packet(now, frame_len_l3, hdr_total);
+    flow.last_ts = ts_sec;
+    if (flow.first_ts == 0.0) flow.first_ts = ts_sec;
+
+    // TCP Feature
+    const bool fin = tcp && tcp->get_flag(TCP::FIN);
+    const bool rst = tcp && tcp->get_flag(TCP::RST);
+    if (is_tcp && (fin || rst)) {
+      Features feat{};
+      flow_finalize(flow, feat, 1.0);
+
+      std::vector<float> input_vec;
+      features_to_float_vector(feat, input_vec);
+
+      IDSResult result2 = ids_predict_from_ordered(ctx, input_vec);
+      std::cout << "[TCP Flow End] "
+            << "attack=" << result2.is_attack
+            << " p_attack=" << result2.p_attack
+            << " class_id=" << result2.class_id
+            << " class=" << result2.class_name
+            << " class_prob=" << result2.class_prob
+            << std::endl;
+
+      flow_map.erase(key);
+      return true;
     }
+
+    // UDP Feature
+    static uint64_t tick = 0;
+    if ((++tick & 0x3FF) == 0) { // ทุก ~1024 แพ็กเก็ต
+      std::vector<std::string> to_close; to_close.reserve(128);
+      for (auto &kv : flow_map) {
+        const std::string& k = kv.first;
+        FlowState& s = kv.second;
+
+        const bool is_udp_flow = (k.rfind("17|", 0) == 0);
+        const bool is_tcp_flow = (k.rfind("6|", 0)  == 0);
+
+        const double idle = ts_sec - s.last_ts;
+        if ((is_udp_flow && idle >= UDP_IDLE_SEC) ||
+            (is_tcp_flow && idle >= TCP_IDLE_SEC)) {
+          to_close.push_back(k);
+        }
+      }
+      for (const auto& k2 : to_close) {
+        auto it = flow_map.find(k2);
+        if (it != flow_map.end()) {
+          Features feat{};
+          const bool is_udp_flow = (k2.rfind("17|", 0) == 0);
+          const double idle_thr = is_udp_flow ? UDP_IDLE_SEC : TCP_IDLE_SEC;
+
+          flow_finalize(it->second, feat, idle_thr);
+
+          std::vector<float> input_vec;
+          features_to_float_vector(feat, input_vec);
+
+          IDSResult result2 = ids_predict_from_ordered(ctx, input_vec);
+          std::cout << "[UDP Flow Idle Close] "
+          << "attack=" << result2.is_attack
+          << " p_attack=" << result2.p_attack
+          << " class_id=" << result2.class_id
+          << " class=" << result2.class_name
+          << " class_prob=" << result2.class_prob
+          << std::endl;
+
+          flow_map.erase(it);
+        }
+      }
+    }
+
     return true;
   });
 }

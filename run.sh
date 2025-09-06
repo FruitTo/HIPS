@@ -1,24 +1,26 @@
 #!/bin/bash
+set -euo pipefail
 
 SOURCE_FILE="main.cpp"
 OUTPUT_FILE="${SOURCE_FILE%.cpp}_exe"
 
-CXX=g++
-CXX_FLAGS="-std=c++20 -Wall -Wextra -g -pthread"
+CXX=${CXX:-g++}
+CXX_FLAGS=${CXX_FLAGS:-"-std=c++20 -O2 -Wall -Wextra -pthread"}
 INCLUDE_FLAGS="-I./include"
-LIB_FLAGS="-L./local/lib -ltins -lpcap -lssl -lxxhash -Wl,-rpath=\$ORIGIN/local/lib"
 
-echo "Compiling $SOURCE_FILE..."
-$CXX $CXX_FLAGS $INCLUDE_FLAGS "$SOURCE_FILE" -o "$OUTPUT_FILE" $LIB_FLAGS
+ORT=${ORT:-/opt/onnxruntime-1.22.1}
+LIBDIR="$ORT/lib"
+if [ ! -d "$LIBDIR" ]; then LIBDIR="$ORT/lib64"; fi
 
-if [ $? -eq 0 ]; then
+ONNX_INC="-I$ORT/include"
+ONNX_LIB="-L$LIBDIR -lonnxruntime -Wl,-rpath,$LIBDIR"
 
-  if [[ "$SOURCE_FILE" == "main.cpp" ]]; then
-    sudo LD_LIBRARY_PATH=./local/lib ./"$OUTPUT_FILE"
-  else
-    LD_LIBRARY_PATH=./local/lib ./"$OUTPUT_FILE"
-  fi
+LIB_FLAGS="-L./local/lib -ltins -lpcap -lssl -lxxhash -Wl,-rpath,\$ORIGIN/local/lib"
+
+$CXX $CXX_FLAGS $INCLUDE_FLAGS $ONNX_INC "$SOURCE_FILE" onnx-api.cpp -o "$OUTPUT_FILE" $LIB_FLAGS $ONNX_LIB
+
+if [[ "$SOURCE_FILE" == "main.cpp" ]]; then
+  sudo env LD_LIBRARY_PATH="./local/lib:$LIBDIR" "./$OUTPUT_FILE"
 else
-  echo "Compilation failed!"
-  exit 1
+  env LD_LIBRARY_PATH="./local/lib:$LIBDIR" "./$OUTPUT_FILE"
 fi

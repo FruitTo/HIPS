@@ -2,410 +2,535 @@
 #define FLOW_H
 
 #include <cstdint>
-#include <string>
 #include <vector>
-#include <chrono>
 #include <algorithm>
 #include <numeric>
 #include <cmath>
-#include <climits>
+#include <limits>
 
-using SteadyClock = std::chrono::steady_clock;
+// ===== TCP flag bits (global scope) =====
+constexpr uint8_t TCP_FIN = 0x01;
+constexpr uint8_t TCP_SYN = 0x02;
+constexpr uint8_t TCP_RST = 0x04;
+constexpr uint8_t TCP_PSH = 0x08;
+constexpr uint8_t TCP_ACK = 0x10;
+constexpr uint8_t TCP_URG = 0x20;
+constexpr uint8_t TCP_ECE = 0x40;
+constexpr uint8_t TCP_CWR = 0x80;
 
-// ===== Common helpers =====
-inline double duration_sec(SteadyClock::time_point first_ts, SteadyClock::time_point last_ts) {
-    if (first_ts.time_since_epoch().count() == 0) return 0.0;
-    auto d = last_ts - first_ts;
-    return std::chrono::duration<double>(d).count();
+constexpr double MICRO = 1e6;
+
+// ----- helpers -----
+inline int8_t clamp_i8(int64_t v) {
+    if (v < 0) return 0;
+    if (v > std::numeric_limits<int8_t>::max()) return std::numeric_limits<int8_t>::max();
+    return static_cast<int8_t>(v);
+}
+inline int32_t clamp_i32(int64_t v) {
+    if (v < std::numeric_limits<int32_t>::min()) return std::numeric_limits<int32_t>::min();
+    if (v > std::numeric_limits<int32_t>::max()) return std::numeric_limits<int32_t>::max();
+    return static_cast<int32_t>(v);
 }
 
-inline double max_length(const std::vector<int>& v) {
-    if (v.empty()) return 0.0;
-    return static_cast<double>(*std::max_element(v.begin(), v.end()));
+template <class T>
+inline double mean_pop(const std::vector<T>& a) {
+    if (a.empty()) return 0.0;
+    return std::accumulate(a.begin(), a.end(), 0.0) / static_cast<double>(a.size());
 }
-
-inline float mean_length(const std::vector<int>& v) {
-    if (v.empty()) return 0.0f;
-    double sum = 0; for (int x : v) sum += x;
-    return static_cast<float>(sum / v.size());
-}
-
-inline float std_length(const std::vector<int>& v) {
-    if (v.size() <= 1) return 0.0f;
-    float m = mean_length(v);
-    double var = 0; for (int x : v) { double d = x - m; var += d*d; }
-    var /= v.size(); // population std
-    return static_cast<float>(std::sqrt(var));
-}
-
-struct Stats {
-    double sum = 0;
-    double mean = 0;
-    double stddev = 0;
-    double min = 0;
-    double max = 0;
-};
-
-inline Stats calc_stats(const std::vector<double>& iats) {
-    Stats s;
-    if (iats.empty()) return s;
-    s.sum = std::accumulate(iats.begin(), iats.end(), 0.0);
-    s.mean = s.sum / iats.size();
-    s.min = *std::min_element(iats.begin(), iats.end());
-    s.max = *std::max_element(iats.begin(), iats.end());
-    double variance = 0.0;
-    for (double v : iats) variance += (v - s.mean) * (v - s.mean);
-    s.stddev = std::sqrt(variance / iats.size());
-    return s;
-}
-
-// ===== Active/Idle helpers (จาก Flow IAT รวมทุกทิศ) =====
-struct PeriodStats {
-    float  mean = 0.0f;
-    float  std  = 0.0f;
-    double mx   = 0.0;
-    double mn   = 0.0;
-};
-
-inline void calc_period_stats(const std::vector<double>& iats, double idle_threshold,
-                              PeriodStats& active, PeriodStats& idle) {
-    std::vector<double> active_periods, idle_periods;
+template <class T>
+inline double var_pop(const std::vector<T>& a, double mean) {
+    if (a.empty()) return 0.0;
     double acc = 0.0;
-    bool in_active = true;
-    bool any = false;
+    for (auto v : a) {
+        double d = static_cast<double>(v) - mean;
+        acc += d * d;
+    }
+    return acc / static_cast<double>(a.size());
+}
+template <class T>
+inline double std_pop(const std::vector<T>& a, double mean) {
+    return std::sqrt(var_pop(a, mean));
+}
 
-    for (double dt : iats) {
-        bool is_active_gap = (dt <= idle_threshold);
-        if (!any) { in_active = is_active_gap; any = true; }
-        if (is_active_gap == in_active) acc += dt;
-        else {
-            if (acc > 0.0) {
-                (in_active ? active_periods : idle_periods).push_back(acc);
-            }
-            in_active = is_active_gap;
-            acc = dt;
+template <class T>
+inline T vec_min(const std::vector<T>& a) {
+    if (a.empty()) return T(0);
+    return *std::min_element(a.begin(), a.end());
+}
+template <class T>
+inline T vec_max(const std::vector<T>& a) {
+    if (a.empty()) return T(0);
+    return *std::max_element(a.begin(), a.end());
+}
+
+// IAT from ordered timestamps (seconds)
+inline std::vector<double> make_iat_seconds(const std::vector<double>& ts) {
+    std::vector<double> out;
+    if (ts.size() < 2) return out;
+    out.reserve(ts.size() - 1);
+    for (size_t i = 1; i < ts.size(); ++i) {
+        double dt = ts[i] - ts[i - 1];
+        if (dt < 0) dt = 0; // guard non-decreasing
+        out.push_back(dt);
+    }
+    return out;
+}
+
+// Active/Idle periods from IAT (seconds)
+struct PeriodStats { double mean=0, std=0, mn=0, mx=0; };
+
+inline PeriodStats to_us_stats(const std::vector<double>& periods_s) {
+    PeriodStats ps;
+    if (periods_s.empty()) return ps;
+    std::vector<double> us; us.reserve(periods_s.size());
+    for (auto s : periods_s) us.push_back(s * MICRO);
+    double m = mean_pop(us);
+    ps.mean = m;
+    ps.std  = std_pop(us, m);
+    ps.mn   = vec_min(us);
+    ps.mx   = vec_max(us);
+    return ps;
+}
+
+inline void build_active_idle_stats(
+    const std::vector<double>& iat_s,
+    double idle_thr_s,
+    PeriodStats& active_us, PeriodStats& idle_us
+) {
+    std::vector<double> active_s;
+    std::vector<double> idle_s;
+    double acc = 0.0;
+    for (auto dt : iat_s) {
+        if (dt <= idle_thr_s) {
+            acc += dt;
+        } else {
+            if (acc > 0.0) { active_s.push_back(acc); acc = 0.0; }
+            idle_s.push_back(dt);
         }
     }
-    if (acc > 0.0) (in_active ? active_periods : idle_periods).push_back(acc);
-
-    auto summarize = [](const std::vector<double>& v, PeriodStats& out) {
-        if (v.empty()) { out = {}; return; }
-        double s = std::accumulate(v.begin(), v.end(), 0.0);
-        double m = s / v.size();
-        double var = 0.0;
-        for (double x : v) var += (x - m) * (x - m);
-        var /= v.size();
-        out.mean = static_cast<float>(m);
-        out.std  = static_cast<float>(std::sqrt(var));
-        out.mx   = *std::max_element(v.begin(), v.end());
-        out.mn   = *std::min_element(v.begin(), v.end());
-    };
-
-    summarize(active_periods, active);
-    summarize(idle_periods, idle);
+    if (acc > 0.0) active_s.push_back(acc);
+    active_us = to_us_stats(active_s);
+    idle_us   = to_us_stats(idle_s);
 }
 
-// ===== Feature container (0–56) =====
-struct Features
-{
-  int64_t flow_duration = 0;
+struct Features {
+    // 0
+    int64_t  flow_duration = 0;                   // µs
 
-  int32_t total_fwd_pkts = 0; // 1
-  int32_t total_bwd_pkts = 0; // 2
+    // 1-2
+    int32_t  total_fwd_packets = 0;
+    int32_t  total_bwd_packets = 0;
 
-  double fwd_len_total = 0.0; // 3
-  double bwd_len_total = 0.0; // 4
+    // 3-4
+    double   fwd_packets_length_total = 0;        // bytes
+    double   bwd_packets_length_total = 0;
 
-  double fwd_len_max = 0.0;   // 5
-  float  fwd_len_mean = 0.0f; // 6
-  float  fwd_len_std  = 0.0f; // 7
+    // 5-7
+    double   fwd_packet_length_max = 0;
+    float    fwd_packet_length_mean = 0;
+    float    fwd_packet_length_std = 0;
 
-  double bwd_len_max = 0.0;   // 8
-  float  bwd_len_mean = 0.0f; // 9
-  float  bwd_len_std  = 0.0f; // 10
+    // 8-10
+    double   bwd_packet_length_max = 0;
+    float    bwd_packet_length_mean = 0;
+    float    bwd_packet_length_std = 0;
 
-  double flow_bytes_per_s = 0.0; // 11
-  double flow_pkts_per_s  = 0.0; // 12
+    // 11-12
+    double   flow_bytes_per_s = 0;
+    double   flow_packets_per_s = 0;
 
-  float  flow_iat_mean = 0.0f; // 13
-  float  flow_iat_std  = 0.0f; // 14
-  double flow_iat_max  = 0.0;  // 15
-  double flow_iat_min  = 0.0;  // 16
+    // 13-16 (µs)
+    float    flow_iat_mean = 0;
+    float    flow_iat_std  = 0;
+    double   flow_iat_max  = 0;
+    double   flow_iat_min  = 0;
 
-  double fwd_iat_total = 0.0; // 17
-  float  fwd_iat_mean  = 0.0f; // 18
-  float  fwd_iat_std   = 0.0f; // 19
-  double fwd_iat_max   = 0.0;  // 20
-  double fwd_iat_min   = 0.0;  // 21
+    // 17-21 (µs)
+    double   fwd_iat_total = 0;
+    float    fwd_iat_mean  = 0;
+    float    fwd_iat_std   = 0;
+    double   fwd_iat_max   = 0;
+    double   fwd_iat_min   = 0;
 
-  double bwd_iat_total = 0.0; // 22
-  float  bwd_iat_mean  = 0.0f; // 23
-  float  bwd_iat_std   = 0.0f; // 24
-  double bwd_iat_max   = 0.0;  // 25
-  double bwd_iat_min   = 0.0;  // 26
+    // 22-26 (µs)
+    double   bwd_iat_total = 0;
+    float    bwd_iat_mean  = 0;
+    float    bwd_iat_std   = 0;
+    double   bwd_iat_max   = 0;
+    double   bwd_iat_min   = 0;
 
-  int8_t  fwd_psh_flags = 0;         // 27
-  int64_t fwd_header_len_total = 0;  // 28
-  int64_t bwd_header_len_total = 0;  // 29
+    // 27-29
+    int8_t   fwd_psh_flags = 0;
+    int64_t  fwd_header_length = 0;               // bytes
+    int64_t  bwd_header_length = 0;
 
-  float fwd_pkts_per_s = 0.0f; // 30
-  float bwd_pkts_per_s = 0.0f; // 31
+    // 30-31
+    float    fwd_packets_per_s = 0;
+    float    bwd_packets_per_s = 0;
 
-  double pkt_len_max  = 0.0;  // 32 (optional: ถ้าเก็บ global per-packet)
-  float  pkt_len_mean = 0.0f; // 33
-  float  pkt_len_std  = 0.0f; // 34
-  float  pkt_len_var  = 0.0f; // 35
+    // 32-35 (all directions)
+    double   packet_length_max = 0;
+    float    packet_length_mean = 0;
+    float    packet_length_std  = 0;
+    float    packet_length_variance = 0;
 
-  int8_t syn_flag_count = 0; // 36
-  int8_t urg_flag_count = 0; // 37
+    // 36-37 (two-way)
+    int8_t   syn_flag_count = 0;
+    int8_t   urg_flag_count = 0;
 
-  float avg_pkt_size     = 0.0f; // 38
-  float avg_fwd_seg_size = 0.0f; // 39
-  float avg_bwd_seg_size = 0.0f; // 40
+    // 38-40
+    float    avg_packet_size = 0;
+    float    avg_fwd_segment_size = 0;
+    float    avg_bwd_segment_size = 0;
 
-  int32_t subflow_fwd_pkts  = 0; // 41
-  int32_t subflow_fwd_bytes = 0; // 42
-  int32_t subflow_bwd_pkts  = 0; // 43
-  int32_t subflow_bwd_bytes = 0; // 44
+    // 41-44 (subflow fallback = totals)
+    int32_t  subflow_fwd_packets = 0;
+    int32_t  subflow_fwd_bytes   = 0;
+    int32_t  subflow_bwd_packets = 0;
+    int32_t  subflow_bwd_bytes   = 0;
 
-  int32_t init_fwd_win_bytes = 0; // 45
-  int32_t init_bwd_win_bytes = 0; // 46
+    // 45-46 (TCP only; else 0)
+    int32_t  init_fwd_win_bytes = 0;
+    int32_t  init_bwd_win_bytes = 0;
 
-  int32_t fwd_act_data_pkts = 0; // 47
-  int32_t fwd_seg_size_min  = 0; // 48
+    // 47-48
+    int32_t  fwd_act_data_pkts = 0;               // payload > 0
+    int32_t  fwd_seg_size_min  = 0;               // min FWD packet length (bytes)
 
-  float  active_mean = 0.0f; // 49
-  float  active_std  = 0.0f; // 50
-  double active_max  = 0.0;  // 51
-  double active_min  = 0.0;  // 52
+    // 49-52 Active periods (µs)
+    float    active_mean = 0;
+    float    active_std  = 0;
+    double   active_max  = 0;
+    double   active_min  = 0;
 
-  float  idle_mean = 0.0f; // 53
-  float  idle_std  = 0.0f; // 54
-  double idle_max  = 0.0;  // 55
-  double idle_min  = 0.0;  // 56
+    // 53-56 Idle periods (µs)
+    float    idle_mean = 0;
+    float    idle_std  = 0;
+    double   idle_max  = 0;
+    double   idle_min  = 0;
 };
 
-// ===== Flow accumulator =====
-struct Flow {
-  std::string key;
+// ================== Functional Flow state & functions ==================
 
-  // Time (for duration + flow IAT)
-  SteadyClock::time_point first_ts{};
-  SteadyClock::time_point last_ts{};      // last seen (any direction)
-  SteadyClock::time_point last_any_ts{};  // for Flow-IAT
+// เดิมเป็น private fields ของ class
+struct FlowState {
+    // --- Timestamps (seconds) ---
+    // ของเดิม
+    double first_ts = 0.0;
+    double last_ts  = 0.0;
 
-  // Per-direction last timestamp
-  SteadyClock::time_point last_fwd_ts{};
-  SteadyClock::time_point last_bwd_ts{};
+    // เพิ่ม alias ฟิลด์ให้ตรงกับโค้ดใน main.cpp
+    // หมายเหตุ: โค้ดปัจจุบันจะอัปเดตทั้งคู่ (เช่น first_ts และ first_ts_sec)
+    // จึงตั้งค่าเริ่มต้นให้เท่ากัน และปล่อยให้โค้ดอัปเดตไปตามการใช้งาน
+    double first_ts_sec  = 0.0;  // ใช้แทน first_ts ในบางจุดของ main.cpp
+    double last_seen_sec = 0.0;  // ใช้แทน last_ts ในบางจุดของ main.cpp
 
-  // Forward
-  int32_t total_fwd = 0;
-  double  total_fwd_length = 0.0;
-  std::vector<int> fwd_length;
+    // --- L4 protocol (เพิ่มให้ตรงกับ main.cpp) ---
+    // ควรเก็บค่าตาม IPPROTO_* (เช่น TCP=6, UDP=17)
+    int l4_proto = 0;
 
-  // Backward
-  int32_t total_bwd = 0;
-  double  total_bwd_length = 0.0;
-  std::vector<int> bwd_length;
+    // --- Flow lifecycle ---
+    bool started = false;
 
-  // Inter-Arrival Time lists
-  std::vector<double> iat_list;      // any direction
-  std::vector<double> iat_fwd_list;  // forward only
-  std::vector<double> iat_bwd_list;  // backward only
+    // --- Packet/byte counters ---
+    int64_t cnt_fwd   = 0;
+    int64_t cnt_bwd   = 0;
+    int64_t bytes_fwd = 0;
+    int64_t bytes_bwd = 0;
 
-  // TCP/Flags/Windows & header metrics
-  int8_t syn_flag_count = 0;  // 36
-  int8_t urg_flag_count = 0;  // 37
-  int8_t fwd_psh_flags  = 0;  // 27
+    // --- Header length sums ---
+    int64_t fwd_hdr_len_sum = 0;
+    int64_t bwd_hdr_len_sum = 0;
 
-  int64_t fwd_header_len_total = 0;  // 28
-  int64_t bwd_header_len_total = 0;  // 29
+    // --- TCP window sizes (initial seen) ---
+    int32_t init_fwd_win_bytes = 0;
+    int32_t init_bwd_win_bytes = 0;
 
-  int32_t init_fwd_win_bytes = -1; // 45
-  int32_t init_bwd_win_bytes = -1; // 46
+    // --- Active data pkts (forward) ---
+    int64_t fwd_act_data_pkts = 0;
 
-  int32_t fwd_act_data_pkts = 0;         // 47
-  int32_t fwd_seg_size_min  = INT32_MAX; // 48 (payload len หรือ packet len ตามนิยามตอนเทรน)
+    // --- TCP flags counters ---
+    int64_t psh_fwd   = 0;
+    int64_t syn_flags = 0;
+    int64_t urg_flags = 0;
 
-  // Subflow placeholder (ยังไม่แยก subflow จริง ให้ใช้ค่ารวมเป็น default)
-  int32_t subflow_fwd_pkts  = 0; // 41
-  int32_t subflow_fwd_bytes = 0; // 42
-  int32_t subflow_bwd_pkts  = 0; // 43
-  int32_t subflow_bwd_bytes = 0; // 44
+    // --- Segmentation / MSS-like stat ---
+    int     min_fwd_seg = -1;
 
-  // Active/Idle threshold (seconds) สำหรับ calc_period_stats จาก iat_list
-  double idle_threshold = 1.0;
+    // --- Per-direction payload lengths ---
+    std::vector<int32_t> fwd_len;
+    std::vector<int32_t> bwd_len;
 
-  // --- Event handlers ---
-  inline void add_packet_any(SteadyClock::time_point now) {
-      if (first_ts.time_since_epoch().count() == 0) {
-          first_ts    = now;
-          last_any_ts = now;
-      } else {
-          double dt = std::chrono::duration<double>(now - last_any_ts).count();
-          if (dt >= 0.0) iat_list.push_back(dt);
-          last_any_ts = now;
-      }
-      last_ts = now;
-  }
-
-  inline void add_fwd_packet(SteadyClock::time_point now, int pkt_len, int hdr_len=0, bool psh=false) {
-      add_packet_any(now);
-      if (last_fwd_ts.time_since_epoch().count() != 0) {
-          double dt = std::chrono::duration<double>(now - last_fwd_ts).count();
-          if (dt >= 0.0) iat_fwd_list.push_back(dt);
-      }
-      last_fwd_ts = now;
-
-      total_fwd += 1;
-      total_fwd_length += static_cast<double>(pkt_len);
-      fwd_length.push_back(pkt_len);
-
-      fwd_header_len_total += hdr_len;
-      if (psh) fwd_psh_flags++;
-  }
-
-  inline void add_bwd_packet(SteadyClock::time_point now, int pkt_len, int hdr_len=0) {
-      add_packet_any(now);
-      if (last_bwd_ts.time_since_epoch().count() != 0) {
-          double dt = std::chrono::duration<double>(now - last_bwd_ts).count();
-          if (dt >= 0.0) iat_bwd_list.push_back(dt);
-      }
-      last_bwd_ts = now;
-
-      total_bwd += 1;
-      total_bwd_length += static_cast<double>(pkt_len);
-      bwd_length.push_back(pkt_len);
-
-      bwd_header_len_total += hdr_len;
-  }
-
-  inline void on_tcp_flags(bool syn, bool urg) {
-      if (syn) syn_flag_count++;
-      if (urg) urg_flag_count++;
-  }
-
-  inline void set_init_win_bytes_fwd(int32_t win_bytes) {
-      if (init_fwd_win_bytes < 0) init_fwd_win_bytes = std::max(0, win_bytes);
-  }
-  inline void set_init_win_bytes_bwd(int32_t win_bytes) {
-      if (init_bwd_win_bytes < 0) init_bwd_win_bytes = std::max(0, win_bytes);
-  }
-
-  // payload_len: ถ้านิยาม segment = payload; ถ้านิยาม segment = packet length ให้ส่ง pkt_len แทนภายนอก
-  inline void on_fwd_payload(int payload_len) {
-      if (payload_len > 0) fwd_act_data_pkts++;
-      if (payload_len >= 0 && payload_len < fwd_seg_size_min) fwd_seg_size_min = payload_len;
-  }
-
-  // --- Finalize (เรียกเมื่อปิดโฟลว์เท่านั้น) ---
-  inline void finalize(Features& out) const {
-      // Duration (usec ตามชุดเทรน)
-      double dur_s = duration_sec(first_ts, last_ts);
-      out.flow_duration = static_cast<int64_t>(dur_s * 1e6);
-
-      // Basic counts/bytes
-      out.total_fwd_pkts = total_fwd;
-      out.total_bwd_pkts = total_bwd;
-      out.fwd_len_total  = total_fwd_length;
-      out.bwd_len_total  = total_bwd_length;
-
-      // Per-second (คำนวณที่นี่เท่านั้น)
-      double bytes_total = total_fwd_length + total_bwd_length;
-      double pkts_total  = static_cast<double>(total_fwd + total_bwd);
-      out.flow_bytes_per_s = (dur_s > 0.0) ? (bytes_total / dur_s) : 0.0;
-      out.flow_pkts_per_s  = (dur_s > 0.0) ? (pkts_total  / dur_s) : 0.0;
-      out.fwd_pkts_per_s   = (dur_s > 0.0) ? static_cast<float>(total_fwd / dur_s) : 0.0f;
-      out.bwd_pkts_per_s   = (dur_s > 0.0) ? static_cast<float>(total_bwd / dur_s) : 0.0f;
-
-      // Length stats
-      out.fwd_len_max  = max_length(fwd_length);
-      out.fwd_len_mean = mean_length(fwd_length);
-      out.fwd_len_std  = std_length(fwd_length);
-
-      out.bwd_len_max  = max_length(bwd_length);
-      out.bwd_len_mean = mean_length(bwd_length);
-      out.bwd_len_std  = std_length(bwd_length);
-
-      // Flow IAT (13–16)
-      {
-          Stats s = calc_stats(iat_list);
-          out.flow_iat_mean = static_cast<float>(s.mean);
-          out.flow_iat_std  = static_cast<float>(s.stddev);
-          out.flow_iat_max  = s.max;
-          out.flow_iat_min  = s.min;
-      }
-      // Fwd IAT (17–21)
-      {
-          Stats s = calc_stats(iat_fwd_list);
-          out.fwd_iat_total = s.sum;
-          out.fwd_iat_mean  = static_cast<float>(s.mean);
-          out.fwd_iat_std   = static_cast<float>(s.stddev);
-          out.fwd_iat_max   = s.max;
-          out.fwd_iat_min   = s.min;
-      }
-      // Bwd IAT (22–26)
-      {
-          Stats s = calc_stats(iat_bwd_list);
-          out.bwd_iat_total = s.sum;
-          out.bwd_iat_mean  = static_cast<float>(s.mean);
-          out.bwd_iat_std   = static_cast<float>(s.stddev);
-          out.bwd_iat_max   = s.max;
-          out.bwd_iat_min   = s.min;
-      }
-
-      // 27–29: PSH + header length totals
-      out.fwd_psh_flags        = fwd_psh_flags;
-      out.fwd_header_len_total = fwd_header_len_total;
-      out.bwd_header_len_total = bwd_header_len_total;
-
-      // 36–37: TCP flags
-      out.syn_flag_count = syn_flag_count;
-      out.urg_flag_count = urg_flag_count;
-
-      // 38: Avg Packet Size
-      {
-          int pkts_total_i = total_fwd + total_bwd;
-          out.avg_pkt_size = (pkts_total_i > 0)
-              ? static_cast<float>((total_fwd_length + total_bwd_length) / pkts_total_i)
-              : 0.0f;
-      }
-
-      // 39–40: Avg segment size ต่อทิศ (ใช้ mean ของ packet length โดยดีฟอลต์)
-      out.avg_fwd_seg_size = out.fwd_len_mean;
-      out.avg_bwd_seg_size = out.bwd_len_mean;
-
-      // 41–44: Subflow (ถ้ายังไม่แยก ให้ใช้ค่ารวม)
-      out.subflow_fwd_pkts  = (subflow_fwd_pkts  > 0) ? subflow_fwd_pkts  : total_fwd;
-      out.subflow_fwd_bytes = (subflow_fwd_bytes > 0) ? subflow_fwd_bytes : static_cast<int32_t>(total_fwd_length);
-      out.subflow_bwd_pkts  = (subflow_bwd_pkts  > 0) ? subflow_bwd_pkts  : total_bwd;
-      out.subflow_bwd_bytes = (subflow_bwd_bytes > 0) ? subflow_bwd_bytes : static_cast<int32_t>(total_bwd_length);
-
-      // 45–46: Init window bytes
-      out.init_fwd_win_bytes = (init_fwd_win_bytes < 0) ? 0 : init_fwd_win_bytes;
-      out.init_bwd_win_bytes = (init_bwd_win_bytes < 0) ? 0 : init_bwd_win_bytes;
-
-      // 47: Fwd active data pkts
-      out.fwd_act_data_pkts = fwd_act_data_pkts;
-
-      // 48: Fwd seg size min
-      out.fwd_seg_size_min = (fwd_seg_size_min == INT32_MAX) ? 0 : fwd_seg_size_min;
-
-      // 49–56: Active/Idle จาก Flow IAT
-      {
-          PeriodStats A, I;
-          calc_period_stats(iat_list, idle_threshold, A, I);
-          out.active_mean = A.mean;
-          out.active_std  = A.std;
-          out.active_max  = A.mx;
-          out.active_min  = A.mn;
-
-          out.idle_mean = I.mean;
-          out.idle_std  = I.std;
-          out.idle_max  = I.mx;
-          out.idle_min  = I.mn;
-      }
-  }
+    // --- All-packet features ---
+    std::vector<int32_t> pkt_len_all;
+    std::vector<double>  times_all;
+    std::vector<double>  times_fwd;
+    std::vector<double>  times_bwd;
 };
+
+inline void flow_init(FlowState& s) { s = FlowState{}; }
+
+inline void flow_add_packet(
+    FlowState& s,
+    bool     is_fwd,
+    double   ts_sec,
+    int32_t  pkt_len,
+    int32_t  ip_hdr_len,
+    int32_t  l4_hdr_len,
+    bool     is_tcp,
+    uint8_t  tcp_flags,
+    int32_t  tcp_window_bytes,
+    int32_t  payload_len
+) {
+    if (!s.started) {
+        s.first_ts = ts_sec;
+        s.started = true;
+    }
+    if (ts_sec < s.last_ts) ts_sec = s.last_ts; // enforce non-decreasing
+    s.last_ts = ts_sec;
+
+    // Common accumulators
+    s.times_all.push_back(ts_sec);
+    s.pkt_len_all.push_back(std::max(0, pkt_len));
+
+    // Header sum (bytes)
+    int64_t hdr_sum = static_cast<int64_t>(std::max(0, ip_hdr_len)) +
+                      static_cast<int64_t>(std::max(0, l4_hdr_len));
+
+    // Flags (two-way)
+    if (is_tcp) {
+        if (tcp_flags & TCP_SYN) ++s.syn_flags;
+        if (tcp_flags & TCP_URG) ++s.urg_flags;
+    }
+
+    if (is_fwd) {
+        ++s.cnt_fwd;
+        s.bytes_fwd += std::max(0, pkt_len);
+        s.fwd_len.push_back(std::max(0, pkt_len));
+        s.fwd_hdr_len_sum += hdr_sum;
+        s.times_fwd.push_back(ts_sec);
+
+        if (is_tcp && (tcp_flags & TCP_PSH)) ++s.psh_fwd;
+
+        if (is_tcp && s.init_fwd_win_bytes == 0 && tcp_window_bytes > 0)
+            s.init_fwd_win_bytes = tcp_window_bytes;
+
+        if (payload_len > 0) ++s.fwd_act_data_pkts;
+
+        if (s.min_fwd_seg < 0 || pkt_len < s.min_fwd_seg)
+            s.min_fwd_seg = std::max(0, pkt_len);
+    } else {
+        ++s.cnt_bwd;
+        s.bytes_bwd += std::max(0, pkt_len);
+        s.bwd_len.push_back(std::max(0, pkt_len));
+        s.bwd_hdr_len_sum += hdr_sum;
+        s.times_bwd.push_back(ts_sec);
+
+        if (is_tcp && s.init_bwd_win_bytes == 0 && tcp_window_bytes > 0)
+            s.init_bwd_win_bytes = tcp_window_bytes;
+    }
+}
+
+inline void flow_finalize(const FlowState& s, Features& out, double idle_threshold_sec = 1.0) {
+    // -------- duration --------
+    double duration_s = s.started ? (s.last_ts - s.first_ts) : 0.0;
+    if (duration_s < 0) duration_s = 0.0;
+    out.flow_duration = static_cast<int64_t>(duration_s * MICRO); // µs
+
+    // -------- simple counters --------
+    out.total_fwd_packets = static_cast<int32_t>(s.cnt_fwd);
+    out.total_bwd_packets = static_cast<int32_t>(s.cnt_bwd);
+
+    out.fwd_packets_length_total = static_cast<double>(s.bytes_fwd);
+    out.bwd_packets_length_total = static_cast<double>(s.bytes_bwd);
+
+    // FWD stats
+    double fwd_mean = mean_pop(s.fwd_len);
+    double fwd_std  = std_pop(s.fwd_len, fwd_mean);
+    out.fwd_packet_length_max  = static_cast<double>(vec_max(s.fwd_len));
+    out.fwd_packet_length_mean = static_cast<float>(fwd_mean);
+    out.fwd_packet_length_std  = static_cast<float>(fwd_std);
+
+    // BWD stats
+    double bwd_mean = mean_pop(s.bwd_len);
+    double bwd_std  = std_pop(s.bwd_len, bwd_mean);
+    out.bwd_packet_length_max  = static_cast<double>(vec_max(s.bwd_len));
+    out.bwd_packet_length_mean = static_cast<float>(bwd_mean);
+    out.bwd_packet_length_std  = static_cast<float>(bwd_std);
+
+    // Rates
+    double total_bytes = static_cast<double>(s.bytes_fwd + s.bytes_bwd);
+    double total_pkts  = static_cast<double>(s.cnt_fwd + s.cnt_bwd);
+    out.flow_bytes_per_s   = (duration_s > 0.0) ? (total_bytes / duration_s) : 0.0;
+    out.flow_packets_per_s = (duration_s > 0.0) ? (total_pkts  / duration_s) : 0.0;
+
+    out.fwd_packets_per_s = static_cast<float>((duration_s > 0.0)
+                                ? (static_cast<double>(s.cnt_fwd) / duration_s) : 0.0);
+    out.bwd_packets_per_s = static_cast<float>((duration_s > 0.0)
+                                ? (static_cast<double>(s.cnt_bwd) / duration_s) : 0.0);
+
+    // -------- IAT (convert to µs) --------
+    auto iat_all = make_iat_seconds(s.times_all);
+    auto iat_fwd = make_iat_seconds(s.times_fwd);
+    auto iat_bwd = make_iat_seconds(s.times_bwd);
+
+    // Flow IAT
+    if (!iat_all.empty()) {
+        std::vector<double> us; us.reserve(iat_all.size());
+        for (auto sec : iat_all) us.push_back(sec * MICRO);
+        double m = mean_pop(us);
+        out.flow_iat_mean = static_cast<float>(m);
+        out.flow_iat_std  = static_cast<float>(std_pop(us, m));
+        out.flow_iat_max  = vec_max(us);
+        out.flow_iat_min  = vec_min(us);
+    } else {
+        out.flow_iat_mean = 0; out.flow_iat_std = 0;
+        out.flow_iat_max = 0;  out.flow_iat_min = 0;
+    }
+
+    // FWD IAT
+    if (!iat_fwd.empty()) {
+        std::vector<double> us; us.reserve(iat_fwd.size());
+        for (auto sec : iat_fwd) us.push_back(sec * MICRO);
+        double m = mean_pop(us);
+        out.fwd_iat_total = std::accumulate(us.begin(), us.end(), 0.0);
+        out.fwd_iat_mean  = static_cast<float>(m);
+        out.fwd_iat_std   = static_cast<float>(std_pop(us, m));
+        out.fwd_iat_max   = vec_max(us);
+        out.fwd_iat_min   = vec_min(us);
+    } else {
+        out.fwd_iat_total = 0; out.fwd_iat_mean = 0; out.fwd_iat_std = 0;
+        out.fwd_iat_max = 0;   out.fwd_iat_min = 0;
+    }
+
+    // BWD IAT
+    if (!iat_bwd.empty()) {
+        std::vector<double> us; us.reserve(iat_bwd.size());
+        for (auto sec : iat_bwd) us.push_back(sec * MICRO);
+        double m = mean_pop(us);
+        out.bwd_iat_total = std::accumulate(us.begin(), us.end(), 0.0);
+        out.bwd_iat_mean  = static_cast<float>(m);
+        out.bwd_iat_std   = static_cast<float>(std_pop(us, m));
+        out.bwd_iat_max   = vec_max(us);
+        out.bwd_iat_min   = vec_min(us);
+    } else {
+        out.bwd_iat_total = 0; out.bwd_iat_mean = 0; out.bwd_iat_std = 0;
+        out.bwd_iat_max = 0;   out.bwd_iat_min = 0;
+    }
+
+    // -------- headers & flags --------
+    out.fwd_psh_flags     = clamp_i8(s.psh_fwd);
+    out.fwd_header_length = s.fwd_hdr_len_sum;
+    out.bwd_header_length = s.bwd_hdr_len_sum;
+
+    out.syn_flag_count = clamp_i8(s.syn_flags);
+    out.urg_flag_count = clamp_i8(s.urg_flags);
+
+    // -------- Packet length (all directions) #32–35 --------
+    double all_mean = mean_pop(s.pkt_len_all);
+    double all_std  = std_pop(s.pkt_len_all, all_mean);
+    out.packet_length_max      = static_cast<double>(vec_max(s.pkt_len_all));
+    out.packet_length_mean     = static_cast<float>(all_mean);
+    out.packet_length_std      = static_cast<float>(all_std);
+    out.packet_length_variance = static_cast<float>(all_std * all_std);
+
+    // -------- averages --------
+    out.avg_packet_size      = static_cast<float>((total_pkts > 0.0) ? (total_bytes / total_pkts) : 0.0);
+    out.avg_fwd_segment_size = static_cast<float>(fwd_mean);
+    out.avg_bwd_segment_size = static_cast<float>(bwd_mean);
+
+    // -------- subflow fallback (totals) --------
+    out.subflow_fwd_packets = static_cast<int32_t>(s.cnt_fwd);
+    out.subflow_fwd_bytes   = clamp_i32(s.bytes_fwd);
+    out.subflow_bwd_packets = static_cast<int32_t>(s.cnt_bwd);
+    out.subflow_bwd_bytes   = clamp_i32(s.bytes_bwd);
+
+    // -------- TCP init win --------
+    out.init_fwd_win_bytes = s.init_fwd_win_bytes;
+    out.init_bwd_win_bytes = s.init_bwd_win_bytes;
+
+    // -------- active data pkts (FWD) --------
+    out.fwd_act_data_pkts = static_cast<int32_t>(s.fwd_act_data_pkts);
+
+    // -------- Fwd Seg Size Min (#48) --------
+    out.fwd_seg_size_min = (s.min_fwd_seg < 0) ? 0 : static_cast<int32_t>(s.min_fwd_seg);
+
+    // -------- Active/Idle periods (µs) --------
+    PeriodStats A, I;
+    build_active_idle_stats(iat_all, idle_threshold_sec, A, I);
+    out.active_mean = static_cast<float>(A.mean);
+    out.active_std  = static_cast<float>(A.std);
+    out.active_max  = A.mx;
+    out.active_min  = A.mn;
+
+    out.idle_mean = static_cast<float>(I.mean);
+    out.idle_std  = static_cast<float>(I.std);
+    out.idle_max  = I.mx;
+    out.idle_min  = I.mn;
+}
+
+inline void flow_reset(FlowState& s) { flow_init(s); }
+
+// Pack to float32 vector in order 0..56 (for ONNX input)
+inline void features_to_float_vector(const Features& f, std::vector<float>& out) {
+    out.clear(); out.reserve(57);
+    out.push_back(static_cast<float>(f.flow_duration));                // 0 (µs)
+    out.push_back(static_cast<float>(f.total_fwd_packets));            // 1
+    out.push_back(static_cast<float>(f.total_bwd_packets));            // 2
+    out.push_back(static_cast<float>(f.fwd_packets_length_total));     // 3
+    out.push_back(static_cast<float>(f.bwd_packets_length_total));     // 4
+    out.push_back(static_cast<float>(f.fwd_packet_length_max));        // 5
+    out.push_back(static_cast<float>(f.fwd_packet_length_mean));       // 6
+    out.push_back(static_cast<float>(f.fwd_packet_length_std));        // 7
+    out.push_back(static_cast<float>(f.bwd_packet_length_max));        // 8
+    out.push_back(static_cast<float>(f.bwd_packet_length_mean));       // 9
+    out.push_back(static_cast<float>(f.bwd_packet_length_std));        // 10
+    out.push_back(static_cast<float>(f.flow_bytes_per_s));             // 11
+    out.push_back(static_cast<float>(f.flow_packets_per_s));           // 12
+    out.push_back(static_cast<float>(f.flow_iat_mean));                // 13 (µs)
+    out.push_back(static_cast<float>(f.flow_iat_std));                 // 14 (µs)
+    out.push_back(static_cast<float>(f.flow_iat_max));                 // 15 (µs)
+    out.push_back(static_cast<float>(f.flow_iat_min));                 // 16 (µs)
+    out.push_back(static_cast<float>(f.fwd_iat_total));                // 17 (µs)
+    out.push_back(static_cast<float>(f.fwd_iat_mean));                 // 18 (µs)
+    out.push_back(static_cast<float>(f.fwd_iat_std));                  // 19 (µs)
+    out.push_back(static_cast<float>(f.fwd_iat_max));                  // 20 (µs)
+    out.push_back(static_cast<float>(f.fwd_iat_min));                  // 21 (µs)
+    out.push_back(static_cast<float>(f.bwd_iat_total));                // 22 (µs)
+    out.push_back(static_cast<float>(f.bwd_iat_mean));                 // 23 (µs)
+    out.push_back(static_cast<float>(f.bwd_iat_std));                  // 24 (µs)
+    out.push_back(static_cast<float>(f.bwd_iat_max));                  // 25 (µs)
+    out.push_back(static_cast<float>(f.bwd_iat_min));                  // 26 (µs)
+    out.push_back(static_cast<float>(f.fwd_psh_flags));                // 27
+    out.push_back(static_cast<float>(f.fwd_header_length));            // 28
+    out.push_back(static_cast<float>(f.bwd_header_length));            // 29
+    out.push_back(static_cast<float>(f.fwd_packets_per_s));            // 30
+    out.push_back(static_cast<float>(f.bwd_packets_per_s));            // 31
+    out.push_back(static_cast<float>(f.packet_length_max));            // 32
+    out.push_back(static_cast<float>(f.packet_length_mean));           // 33
+    out.push_back(static_cast<float>(f.packet_length_std));            // 34
+    out.push_back(static_cast<float>(f.packet_length_variance));       // 35
+    out.push_back(static_cast<float>(f.syn_flag_count));               // 36
+    out.push_back(static_cast<float>(f.urg_flag_count));               // 37
+    out.push_back(static_cast<float>(f.avg_packet_size));              // 38
+    out.push_back(static_cast<float>(f.avg_fwd_segment_size));         // 39
+    out.push_back(static_cast<float>(f.avg_bwd_segment_size));         // 40
+    out.push_back(static_cast<float>(f.subflow_fwd_packets));          // 41
+    out.push_back(static_cast<float>(f.subflow_fwd_bytes));            // 42
+    out.push_back(static_cast<float>(f.subflow_bwd_packets));          // 43
+    out.push_back(static_cast<float>(f.subflow_bwd_bytes));            // 44
+    out.push_back(static_cast<float>(f.init_fwd_win_bytes));           // 45
+    out.push_back(static_cast<float>(f.init_bwd_win_bytes));           // 46
+    out.push_back(static_cast<float>(f.fwd_act_data_pkts));            // 47
+    out.push_back(static_cast<float>(f.fwd_seg_size_min));             // 48
+    out.push_back(static_cast<float>(f.active_mean));                  // 49 (µs)
+    out.push_back(static_cast<float>(f.active_std));                   // 50 (µs)
+    out.push_back(static_cast<float>(f.active_max));                   // 51 (µs)
+    out.push_back(static_cast<float>(f.active_min));                   // 52 (µs)
+    out.push_back(static_cast<float>(f.idle_mean));                    // 53 (µs)
+    out.push_back(static_cast<float>(f.idle_std));                     // 54 (µs)
+    out.push_back(static_cast<float>(f.idle_max));                     // 55 (µs)
+    out.push_back(static_cast<float>(f.idle_min));                     // 56 (µs)
+}
 
 #endif // FLOW_H

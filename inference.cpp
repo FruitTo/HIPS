@@ -58,7 +58,7 @@ int main(int argc, char** argv){
         double bwd_mean = (tot_bwd_pkts>0)? (double)totlen_bwd / (double)tot_bwd_pkts : NAN;
         double flow_iat_mean = (i>0)? now_ms / (double)i : NAN;
 
-        unordered_map<string,float> fmap; // leave others as NaN (imputer will handle)
+        unordered_map<string,float> fmap;
 
         // Attempt to set common CIC-IDS style fields if present in meta names
         set_if_name_contains(fmap, ctx.feature_order, {"flow duration"}, (float)flow_dur);
