@@ -1,0 +1,13 @@
+{"timestamp":"2025-09-06T07:26:45Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DoS","prob":0.424500}
+{"timestamp":"2025-09-06T07:26:45Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DDoS","prob":0.567898}
+{"timestamp":"2025-09-06T07:26:45Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DoS","prob":0.528680}
+{"timestamp":"2025-09-06T07:26:45Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DoS","prob":0.424979}
+{"timestamp":"2025-09-06T07:26:45Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DoS","prob":0.513769}
+{"timestamp":"2025-09-06T07:26:57Z","src_ip":"192.168.1.77","src_port":45173,"dst_ip":"104.29.142.81","dst_port":19310,"protocol":"UDP","attack_type":"DoS","prob":0.424500}
+{"timestamp":"2025-09-06T07:26:57Z","src_ip":"192.168.1.77","src_port":45173,"dst_ip":"104.29.142.81","dst_port":19310,"protocol":"UDP","attack_type":"DoS","prob":0.424500}
+{"timestamp":"2025-09-06T07:27:05Z","src_ip":"2a03:2880:f28b:1cd:face:b00c:0:43fe","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":47387,"protocol":"UDP","attack_type":"DoS","prob":0.424498}
+{"timestamp":"2025-09-06T07:27:05Z","src_ip":"2a03:2880:f28b:1cd:face:b00c:0:43fe","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":47387,"protocol":"UDP","attack_type":"DoS","prob":0.424498}
+{"timestamp":"2025-09-06T07:27:05Z","src_ip":"2a03:2880:f28b:1cd:face:b00c:0:43fe","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":47387,"protocol":"UDP","attack_type":"DoS","prob":0.424498}
+{"timestamp":"2025-09-06T07:27:53Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DoS","prob":0.924832}
+{"timestamp":"2025-09-06T07:27:53Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DDoS","prob":0.659791}
+{"timestamp":"2025-09-06T07:27:53Z","src_ip":"2403:6200:ffff:ff94::d","src_port":443,"dst_ip":"2403:6200:8947:1cf8:41eb:ac1a:a030:1f38","dst_port":35721,"protocol":"UDP","attack_type":"DoS","prob":0.424500}

@@ -6,6 +6,10 @@
 #include "./include/tins/tins.h"
 #include "./include/ids_api.h"
 
+#include <sstream>
+#include <set>
+#include <limits>
+#include <optional>
 #include <fstream>
 #include <chrono>
 #include <cstdlib>
@@ -21,6 +25,9 @@
 #include <thread>
 #include <map>
 #include <netinet/in.h> 
+#include <mutex>
+#include <unordered_map>
+#include <iomanip>
 
 using namespace std;
 using namespace Tins;
@@ -29,10 +36,13 @@ using namespace chrono;
 namespace fs = filesystem;
 using SteadyClock = chrono::steady_clock; 
 
+void write_attack_json(const string& src_ip, int src_port, const string& dst_ip, int dst_port, const string& protocol, const string& att_type, double prob);
+string getProtocol(uint8_t proto, const NetworkConfig& conf, uint16_t sport, uint16_t dport);
 void sniff(NetworkConfig &conf);
 void parsePorts(const string &input, vector<string> &target);
 string join(const vector<string> &list, const string &sep);
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
+inline const char* l4_name(uint8_t proto);
 
 int main() {
   // ONNX
@@ -143,7 +153,7 @@ int main() {
 
   // Sniffer
   for (NetworkConfig &conf : configuredInterfaces) {
-    task.push_back(pool.submit_task([&conf]() { sniff(conf); }));
+    task.push_back(pool.submit_task([conf]() mutable { sniff(conf); }));
   }
 
   for (auto &t : task) {
@@ -155,11 +165,11 @@ int main() {
 
 void sniff(NetworkConfig &conf) {
   // Initial Log Variable
-  std::string currentDay  = currentDate();
-  std::string currentTime = timeStamp();
-  std::string currentPath = getPath();
-  std::filesystem::create_directories(currentPath);
-  auto writer = std::make_unique<PacketWriter>(
+  string currentDay  = currentDate();
+  string currentTime = timeStamp();
+  string currentPath = getPath();
+  filesystem::create_directories(currentPath);
+  auto writer = make_unique<PacketWriter>(
       currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap",
       DataLinkType<EthernetII>());
 
@@ -172,9 +182,9 @@ void sniff(NetworkConfig &conf) {
   IDSContext ctx = ids_init("./artifacts");
 
   // Flow Variable
-  std::unordered_map<std::string, FlowState> flow_map;
-  using SteadyClock = std::chrono::steady_clock;
-  using namespace std::chrono;
+  unordered_map<string, FlowState> flow_map;
+  using SteadyClock = chrono::steady_clock;
+  using namespace chrono;
   const auto t0 = SteadyClock::now();
 
   // idle thresholds
@@ -183,14 +193,14 @@ void sniff(NetworkConfig &conf) {
 
   sniffer.sniff_loop([&](Packet &pkt) {
     // --- Rotate PCAP daily (ใช้รูปแบบไฟล์เดียวกันทุกครั้ง) ---
-    std::string date = currentDate();
-    std::string path = getPath();
+    string date = currentDate();
+    string path = getPath();
     if (currentDay != date) {
       currentDay  = date;
       currentPath = path;
-      std::filesystem::create_directories(currentPath);
-      std::string ts = timeStamp();
-      writer = std::make_unique<PacketWriter>(
+      filesystem::create_directories(currentPath);
+      string ts = timeStamp();
+      writer = make_unique<PacketWriter>(
           currentPath + conf.NAME + "_" + currentDay + "_" + ts + ".pcap",
           DataLinkType<EthernetII>());
     }
@@ -208,7 +218,7 @@ void sniff(NetworkConfig &conf) {
     uint8_t proto = 0; // 6=TCP, 17=UDP, 58=ICMPv6, 1=ICMP
     int frame_len_l3 = 0;
     int ip_hdr_len   = 0;
-    std::string src_str, dst_str;
+    string src_str, dst_str;
 
     if (ip4) {
       proto        = ip4->protocol();
@@ -236,9 +246,9 @@ void sniff(NetworkConfig &conf) {
     const ICMP*   icmp4 = (!tcp && !udp) ? pdu->find_pdu<ICMP>()   : nullptr;
     const ICMPv6* icmp6 = (!tcp && !udp && !icmp4) ? pdu->find_pdu<ICMPv6>() : nullptr;
 
-    const std::string key =
-        std::to_string(proto) + "|" + src_str + ":" + std::to_string(sport) +
-        "->" + dst_str + ":" + std::to_string(dport);
+    const string key =
+        to_string(proto) + "|" + src_str + ":" + to_string(sport) +
+        "->" + dst_str + ":" + to_string(dport);
 
     FlowState& flow = flow_map[key];
     if (!flow.started) {
@@ -297,17 +307,40 @@ void sniff(NetworkConfig &conf) {
       Features feat{};
       flow_finalize(flow, feat, 1.0);
 
-      std::vector<float> input_vec;
+      vector<float> input_vec;
       features_to_float_vector(feat, input_vec);
 
-      IDSResult result2 = ids_predict_from_ordered(ctx, input_vec);
-      std::cout << "[TCP Flow End] "
-            << "attack=" << result2.is_attack
-            << " p_attack=" << result2.p_attack
-            << " class_id=" << result2.class_id
-            << " class=" << result2.class_name
-            << " class_prob=" << result2.class_prob
-            << std::endl;
+      IDSResult result = ids_predict_from_ordered(ctx, input_vec);
+      // cout << "[TCP Flow End] "
+      //       << "attack=" << result.is_attack
+      //       << " p_attack=" << result.p_attack
+      //       << " class_id=" << result.class_id
+      //       << " class=" << result.class_name
+      //       << " class_prob=" << result.class_prob
+      //       << endl;
+
+      // Filter Result
+      if(result.class_name != "Benign"){
+        string src_ip = src_str;
+        int src_port = sport;
+        string dst_ip = dst_str;
+        int dst_port = dport;
+        string protocol = getProtocol(proto,conf,sport, dport);
+        string att_type = result.class_name;
+        double prob = result.class_prob;
+
+            write_attack_json(src_ip, src_port, dst_ip, dst_port, protocol, att_type, prob);
+
+        cout << "{"
+          << "\"src_ip\":\"" << src_ip << "\","
+          << "\"src_port\":" << src_port << ","
+          << "\"dst_ip\":\"" << dst_ip << "\","
+          << "\"dst_port\":" << dst_port << ","
+          << "\"protocol\":\"" << protocol << "\","
+          << "\"attack_type\":\"" << att_type << "\","
+          << "\"prob\":" << prob
+          << "}" << endl;
+      }
 
       flow_map.erase(key);
       return true;
@@ -315,10 +348,10 @@ void sniff(NetworkConfig &conf) {
 
     // UDP Feature
     static uint64_t tick = 0;
-    if ((++tick & 0x3FF) == 0) { // ทุก ~1024 แพ็กเก็ต
-      std::vector<std::string> to_close; to_close.reserve(128);
+    if ((++tick & 0x3FF) == 0) {
+      vector<string> to_close; to_close.reserve(128);
       for (auto &kv : flow_map) {
-        const std::string& k = kv.first;
+        const string& k = kv.first;
         FlowState& s = kv.second;
 
         const bool is_udp_flow = (k.rfind("17|", 0) == 0);
@@ -339,18 +372,43 @@ void sniff(NetworkConfig &conf) {
 
           flow_finalize(it->second, feat, idle_thr);
 
-          std::vector<float> input_vec;
+          vector<float> input_vec;
           features_to_float_vector(feat, input_vec);
 
-          IDSResult result2 = ids_predict_from_ordered(ctx, input_vec);
-          std::cout << "[UDP Flow Idle Close] "
-          << "attack=" << result2.is_attack
-          << " p_attack=" << result2.p_attack
-          << " class_id=" << result2.class_id
-          << " class=" << result2.class_name
-          << " class_prob=" << result2.class_prob
-          << std::endl;
+          IDSResult result = ids_predict_from_ordered(ctx, input_vec);
+          // cout << "[UDP Flow Idle Close] "
+          // << "attack=" << result.is_attack
+          // << " p_attack=" << result.p_attack
+          // << " class_id=" << result.class_id
+          // << " class=" << result.class_name
+          // << " class_prob=" << result.class_prob
+          // << endl;
 
+      // Filter Result
+      if(result.class_name != "Benign"){
+        string src_ip = src_str;
+        int src_port = sport;
+        string dst_ip = dst_str;
+        int dst_port = dport;
+        string protocol = getProtocol(proto, conf, sport, dport);
+        string att_type = result.class_name;
+        double prob = result.class_prob;
+
+            write_attack_json(src_ip, src_port, dst_ip, dst_port, protocol, att_type, prob);
+
+      cout << "{"
+          << "\"src_ip\":\"" << src_ip << "\","
+          << "\"src_port\":" << src_port << ","
+          << "\"dst_ip\":\"" << dst_ip << "\","
+          << "\"dst_port\":" << dst_port << ","
+          << "\"protocol\":\"" << protocol << "\","
+          << "\"attack_type\":\"" << att_type << "\","
+          << "\"prob\":" << prob
+          << "}" << endl;
+      }
+
+
+      
           flow_map.erase(it);
         }
       }
@@ -358,6 +416,104 @@ void sniff(NetworkConfig &conf) {
 
     return true;
   });
+}
+
+void write_attack_json(const string& src_ip, int src_port,
+                       const string& dst_ip, int dst_port,
+                       const string& protocol, const string& att_type,
+                       double prob) 
+{
+    static mutex mtx;
+    lock_guard<mutex> lk(mtx);
+    ofstream out("./alert.jsonl", ios::out | ios::app);
+    if (!out) {
+        cerr << "[ERR] cannot open alert.jsonl for writing\n";
+        return;
+    }
+
+    using namespace std::chrono;
+    auto now = system_clock::now();
+    std::time_t tt = system_clock::to_time_t(now);
+    std::tm gmt = *std::gmtime(&tt);
+
+    std::ostringstream ts_str;
+    ts_str << std::put_time(&gmt, "%Y-%m-%dT%H:%M:%SZ");
+
+    out << '{'
+        << "\"timestamp\":\"" << ts_str.str() << "\","
+        << "\"src_ip\":\""  << src_ip   << "\","
+        << "\"src_port\":"  << src_port << ','
+        << "\"dst_ip\":\""  << dst_ip   << "\","
+        << "\"dst_port\":"  << dst_port << ','
+        << "\"protocol\":\""<< protocol << "\","
+        << "\"attack_type\":\"" << att_type << "\","
+        << "\"prob\":" << fixed << setprecision(6) << prob
+        << "}\n";
+
+    out.close();
+}
+
+inline bool hit_ports(const vector<string>& ports, uint16_t sport, uint16_t dport) {
+    const string ss = to_string(sport);
+    const string sd = to_string(dport);
+    for (const auto& p : ports) {
+        if (p == ss || p == sd) return true;
+    }
+    return false;
+}
+
+inline const char* l4_name(uint8_t proto) {switch (proto) {
+        case 6:  return "TCP";
+        case 17: return "UDP";
+        case 1:
+        case 58: return "ICMP"; // รวม ICMPv6
+        default: return "OTHER";
+    }
+}
+
+string getProtocol(uint8_t proto, const NetworkConfig& conf, uint16_t sport, uint16_t dport){
+    if (proto == 6) { // TCP
+        if (conf.HTTP_SERVERS.value_or(false) && hit_ports(conf.HTTP_PORTS, sport, dport))
+            return "HTTP";
+        if (conf.SSH_SERVERS.value_or(false) && hit_ports(conf.SSH_PORTS, sport, dport))
+            return "SSH";
+        if (conf.FTP_SERVERS.value_or(false) && hit_ports(conf.FTP_PORTS, sport, dport))
+            return "FTP";
+
+        // พอร์ตมาตรฐานที่ไม่ได้มาจาก config
+        if (conf.SMTP_SERVERS.value_or(false) &&
+            (sport==25 || dport==25 || sport==587 || dport==587 || sport==465 || dport==465))
+            return "SMTP";
+        if (conf.TELNET_SERVERS.value_or(false) &&
+            (sport==23 || dport==23 || sport==2323 || dport==2323))
+            return "TELNET";
+
+        // ตัวอย่างบริการเสริม (ถ้าอยากครอบคลุมมากขึ้น)
+        if (sport==443 || dport==443 || sport==8443 || dport==8443) return "HTTPS";
+        if (sport==3389 || dport==3389) return "RDP";
+        if (sport==3306 || dport==3306) return "MySQL";
+        if (sport==1433 || dport==1433) return "MSSQL";
+
+        return l4_name(proto); // "TCP"
+    }
+    else if (proto == 17) { // UDP
+        if (conf.SIP_SERVERS.value_or(false) && hit_ports(conf.SIP_PORTS, sport, dport))
+            return "SIP";
+
+        // มาตรฐานยอดนิยมฝั่ง UDP
+        if (sport==53  || dport==53 )  return "DNS";
+        if (sport==123 || dport==123)  return "NTP";
+        if (sport==161 || dport==161)  return "SNMP";
+        if (sport==500 || dport==500)  return "IKE";
+        if (sport==69  || dport==69 )  return "TFTP";
+
+        return l4_name(proto); // "UDP"
+    }
+    else if (proto == 1 || proto == 58) { // ICMP/ICMPv6
+        return "ICMP";
+    }
+
+    return "OTHER";
 }
 
 void parsePorts(const string &input, vector<string> &target) {
