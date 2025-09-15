@@ -24,7 +24,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <map>
-#include <netinet/in.h> 
+#include <netinet/in.h>
 #include <mutex>
 #include <unordered_map>
 #include <iomanip>
@@ -34,17 +34,18 @@ using namespace Tins;
 using namespace BS;
 using namespace chrono;
 namespace fs = filesystem;
-using SteadyClock = chrono::steady_clock; 
+using SteadyClock = chrono::steady_clock;
 
-void write_attack_json(const string& src_ip, int src_port, const string& dst_ip, int dst_port, const string& protocol, const string& att_type, double prob);
-string getProtocol(uint8_t proto, const NetworkConfig& conf, uint16_t sport, uint16_t dport);
+void write_attack_json(const string &src_ip, int src_port, const string &dst_ip, int dst_port, const string &protocol, const string &att_type, double prob);
+string getProtocol(uint8_t proto, const NetworkConfig &conf, uint16_t sport, uint16_t dport);
 void sniff(NetworkConfig &conf);
 void parsePorts(const string &input, vector<string> &target);
 string join(const vector<string> &list, const string &sep);
 void config(bool mode, const vector<NetworkConfig> &configuredInterfaces);
-inline const char* l4_name(uint8_t proto);
+inline const char *l4_name(uint8_t proto);
 
-int main() {
+int main()
+{
   // ONNX
   // IDSContext ctx = ids_init("./artifacts");
 
@@ -61,7 +62,8 @@ int main() {
   mode = (modeInput == 'y' || modeInput == 'Y');
 
   // Config Interface
-  for (const string &iface : interfaceName) {
+  for (const string &iface : interfaceName)
+  {
     NetworkConfig conf;
     char yesno;
     string input;
@@ -73,23 +75,25 @@ int main() {
 
     cout << "\nConfiguring services for interface: " << iface << "\n";
 
-    auto askService = [&](const string &name, optional<bool> &flag, vector<string> &ports) {
+    auto askService = [&](const string &name, optional<bool> &flag, vector<string> &ports)
+    {
       cout << name << " Service? [y/n]: ";
       cin >> yesno;
       cin.ignore(numeric_limits<streamsize>::max(), '\n');
       bool enabled = (yesno == 'y' || yesno == 'Y');
       flag = enabled;
-      if (enabled) {
+      if (enabled)
+      {
         cout << "Enter " << name << " port(s) (space separated): ";
         getline(cin, input);
         parsePorts(input, ports);
       }
     };
 
-    askService("HTTP",   conf.HTTP_SERVERS,   conf.HTTP_PORTS);
-    askService("SSH",    conf.SSH_SERVERS,    conf.SSH_PORTS);
-    askService("FTP",    conf.FTP_SERVERS,    conf.FTP_PORTS);
-    askService("Oracle", conf.SQL_SERVERS,    conf.ORACLE_PORTS);
+    askService("HTTP", conf.HTTP_SERVERS, conf.HTTP_PORTS);
+    askService("SSH", conf.SSH_SERVERS, conf.SSH_PORTS);
+    askService("FTP", conf.FTP_SERVERS, conf.FTP_PORTS);
+    askService("Oracle", conf.SQL_SERVERS, conf.ORACLE_PORTS);
     askService("TELNET", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
 
     configuredInterfaces.push_back(conf);
@@ -100,7 +104,8 @@ int main() {
 
   // Create Snort Process
   pid_t pid = fork();
-  if (pid == 0) {
+  if (pid == 0)
+  {
     vector<char *> argv;
 
     argv.push_back(strdup("sudo"));
@@ -117,7 +122,8 @@ int main() {
     argv.push_back(strdup("passive"));
 
     // Interface
-    for (const auto &ifn : interfaceName) {
+    for (const auto &ifn : interfaceName)
+    {
       argv.push_back(strdup("-i"));
       argv.push_back(strdup(ifn.c_str()));
     }
@@ -135,8 +141,10 @@ int main() {
     argv.push_back(nullptr);
 
     cout << "[Snort command] ";
-    for (char *arg : argv) {
-      if (arg != nullptr) cout << arg << " ";
+    for (char *arg : argv)
+    {
+      if (arg != nullptr)
+        cout << arg << " ";
     }
     cout << endl;
 
@@ -152,22 +160,27 @@ int main() {
   // }
 
   // Sniffer
-  for (NetworkConfig &conf : configuredInterfaces) {
-    task.push_back(pool.submit_task([conf]() mutable { sniff(conf); }));
+  for (NetworkConfig &conf : configuredInterfaces)
+  {
+    task.push_back(pool.submit_task([conf]() mutable
+                                    { sniff(conf); }));
   }
 
-  for (auto &t : task) {
+  for (auto &t : task)
+  {
     t.wait();
   }
 
   return 0;
 }
 
-void sniff(NetworkConfig &conf) {
+void sniff(NetworkConfig &conf)
+{
+
   // Initial Log Variable
-  string currentDay  = currentDate();
+  string currentDay = currentDate();
   string currentTime = timeStamp();
-  string currentPath = getPath();
+  string currentPath = "./logs/" + getPath();
   filesystem::create_directories(currentPath);
   auto writer = make_unique<PacketWriter>(
       currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap",
@@ -188,10 +201,11 @@ void sniff(NetworkConfig &conf) {
   const auto t0 = SteadyClock::now();
 
   // idle thresholds
-  static constexpr double UDP_IDLE_SEC = 1.0;   // close UDP flow after 1s idle
-  static constexpr double TCP_IDLE_SEC = 60.0;  // close TCP flow after 60s idle
+  static constexpr double UDP_IDLE_SEC = 1.0;  // close UDP flow after 1s idle
+  static constexpr double TCP_IDLE_SEC = 60.0; // close TCP flow after 60s idle
 
-  sniffer.sniff_loop([&](Packet &pkt) {
+  sniffer.sniff_loop([&](Packet &pkt)
+                     {
     // --- Rotate PCAP daily (ใช้รูปแบบไฟล์เดียวกันทุกครั้ง) ---
     string date = currentDate();
     string path = getPath();
@@ -414,132 +428,166 @@ void sniff(NetworkConfig &conf) {
       }
     }
 
-    return true;
-  });
+    return true; });
 }
 
-void write_attack_json(const string& src_ip, int src_port,
-                       const string& dst_ip, int dst_port,
-                       const string& protocol, const string& att_type,
-                       double prob) 
+void write_attack_json(const string &src_ip, int src_port,
+                       const string &dst_ip, int dst_port,
+                       const string &protocol, const string &att_type,
+                       double prob)
 {
-    static mutex mtx;
-    lock_guard<mutex> lk(mtx);
-    ofstream out("./alert.jsonl", ios::out | ios::app);
-    if (!out) {
-        cerr << "[ERR] cannot open alert.jsonl for writing\n";
-        return;
-    }
+  static mutex mtx;
+  lock_guard<mutex> lk(mtx);
+  string alert_path = "./alert/" + getPath() + currentDate() + ".jsonl";
+  string path = "./alert/" + getPath();
+  filesystem::create_directories(path);
+  ofstream out(alert_path, ios::out | ios::app);
+  if (!out)
+  {
+    cerr << "[ERR] cannot open alert.jsonl for writing\n";
+    return;
+  }
 
-    using namespace std::chrono;
-    auto now = system_clock::now();
-    std::time_t tt = system_clock::to_time_t(now);
-    std::tm gmt = *std::gmtime(&tt);
 
-    std::ostringstream ts_str;
-    ts_str << std::put_time(&gmt, "%Y-%m-%dT%H:%M:%SZ");
+  using namespace chrono;
+  auto now = system_clock::now();
+  time_t tt = system_clock::to_time_t(now);
+  tm gmt = *gmtime(&tt);
 
-    out << '{'
-        << "\"timestamp\":\"" << ts_str.str() << "\","
-        << "\"src_ip\":\""  << src_ip   << "\","
-        << "\"src_port\":"  << src_port << ','
-        << "\"dst_ip\":\""  << dst_ip   << "\","
-        << "\"dst_port\":"  << dst_port << ','
-        << "\"protocol\":\""<< protocol << "\","
-        << "\"attack_type\":\"" << att_type << "\","
-        << "\"prob\":" << fixed << setprecision(6) << prob
-        << "}\n";
+  ostringstream ts_str;
+  ts_str << put_time(&gmt, "%Y-%m-%dT%H:%M:%SZ");
 
-    out.close();
+  out << '{'
+    << "\"timestamp\":\"" << ts_str.str() << "\","
+    << "\"src_ip\":\"" << src_ip << "\","
+    << "\"src_port\":" << src_port << ','
+    << "\"dst_ip\":\"" << dst_ip << "\","
+    << "\"dst_port\":" << dst_port << ','
+    << "\"protocol\":\"" << protocol << "\","
+    << "\"attack_type\":\"" << att_type << "\","
+    << "\"prob\":" << fixed << setprecision(6) << prob
+    << "}\n";
+
+  out.close();
 }
 
-inline bool hit_ports(const vector<string>& ports, uint16_t sport, uint16_t dport) {
-    const string ss = to_string(sport);
-    const string sd = to_string(dport);
-    for (const auto& p : ports) {
-        if (p == ss || p == sd) return true;
-    }
-    return false;
+inline bool hit_ports(const vector<string> &ports, uint16_t sport, uint16_t dport)
+{
+  const string ss = to_string(sport);
+  const string sd = to_string(dport);
+  for (const auto &p : ports)
+  {
+    if (p == ss || p == sd)
+      return true;
+  }
+  return false;
 }
 
-inline const char* l4_name(uint8_t proto) {switch (proto) {
-        case 6:  return "TCP";
-        case 17: return "UDP";
-        case 1:
-        case 58: return "ICMP"; // รวม ICMPv6
-        default: return "OTHER";
-    }
-}
-
-string getProtocol(uint8_t proto, const NetworkConfig& conf, uint16_t sport, uint16_t dport){
-    if (proto == 6) { // TCP
-        if (conf.HTTP_SERVERS.value_or(false) && hit_ports(conf.HTTP_PORTS, sport, dport))
-            return "HTTP";
-        if (conf.SSH_SERVERS.value_or(false) && hit_ports(conf.SSH_PORTS, sport, dport))
-            return "SSH";
-        if (conf.FTP_SERVERS.value_or(false) && hit_ports(conf.FTP_PORTS, sport, dport))
-            return "FTP";
-
-        // พอร์ตมาตรฐานที่ไม่ได้มาจาก config
-        if (conf.SMTP_SERVERS.value_or(false) &&
-            (sport==25 || dport==25 || sport==587 || dport==587 || sport==465 || dport==465))
-            return "SMTP";
-        if (conf.TELNET_SERVERS.value_or(false) &&
-            (sport==23 || dport==23 || sport==2323 || dport==2323))
-            return "TELNET";
-
-        // ตัวอย่างบริการเสริม (ถ้าอยากครอบคลุมมากขึ้น)
-        if (sport==443 || dport==443 || sport==8443 || dport==8443) return "HTTPS";
-        if (sport==3389 || dport==3389) return "RDP";
-        if (sport==3306 || dport==3306) return "MySQL";
-        if (sport==1433 || dport==1433) return "MSSQL";
-
-        return l4_name(proto); // "TCP"
-    }
-    else if (proto == 17) { // UDP
-        if (conf.SIP_SERVERS.value_or(false) && hit_ports(conf.SIP_PORTS, sport, dport))
-            return "SIP";
-
-        // มาตรฐานยอดนิยมฝั่ง UDP
-        if (sport==53  || dport==53 )  return "DNS";
-        if (sport==123 || dport==123)  return "NTP";
-        if (sport==161 || dport==161)  return "SNMP";
-        if (sport==500 || dport==500)  return "IKE";
-        if (sport==69  || dport==69 )  return "TFTP";
-
-        return l4_name(proto); // "UDP"
-    }
-    else if (proto == 1 || proto == 58) { // ICMP/ICMPv6
-        return "ICMP";
-    }
-
+inline const char *l4_name(uint8_t proto)
+{
+  switch (proto)
+  {
+  case 6:
+    return "TCP";
+  case 17:
+    return "UDP";
+  case 1:
+  case 58:
+    return "ICMP"; // รวม ICMPv6
+  default:
     return "OTHER";
+  }
 }
 
-void parsePorts(const string &input, vector<string> &target) {
+string getProtocol(uint8_t proto, const NetworkConfig &conf, uint16_t sport, uint16_t dport)
+{
+  if (proto == 6)
+  { // TCP
+    if (conf.HTTP_SERVERS.value_or(false) && hit_ports(conf.HTTP_PORTS, sport, dport))
+      return "HTTP";
+    if (conf.SSH_SERVERS.value_or(false) && hit_ports(conf.SSH_PORTS, sport, dport))
+      return "SSH";
+    if (conf.FTP_SERVERS.value_or(false) && hit_ports(conf.FTP_PORTS, sport, dport))
+      return "FTP";
+
+    // พอร์ตมาตรฐานที่ไม่ได้มาจาก config
+    if (conf.SMTP_SERVERS.value_or(false) &&
+        (sport == 25 || dport == 25 || sport == 587 || dport == 587 || sport == 465 || dport == 465))
+      return "SMTP";
+    if (conf.TELNET_SERVERS.value_or(false) &&
+        (sport == 23 || dport == 23 || sport == 2323 || dport == 2323))
+      return "TELNET";
+
+    // ตัวอย่างบริการเสริม (ถ้าอยากครอบคลุมมากขึ้น)
+    if (sport == 443 || dport == 443 || sport == 8443 || dport == 8443)
+      return "HTTPS";
+    if (sport == 3389 || dport == 3389)
+      return "RDP";
+    if (sport == 3306 || dport == 3306)
+      return "MySQL";
+    if (sport == 1433 || dport == 1433)
+      return "MSSQL";
+
+    return l4_name(proto); // "TCP"
+  }
+  else if (proto == 17)
+  { // UDP
+    if (conf.SIP_SERVERS.value_or(false) && hit_ports(conf.SIP_PORTS, sport, dport))
+      return "SIP";
+
+    // มาตรฐานยอดนิยมฝั่ง UDP
+    if (sport == 53 || dport == 53)
+      return "DNS";
+    if (sport == 123 || dport == 123)
+      return "NTP";
+    if (sport == 161 || dport == 161)
+      return "SNMP";
+    if (sport == 500 || dport == 500)
+      return "IKE";
+    if (sport == 69 || dport == 69)
+      return "TFTP";
+
+    return l4_name(proto); // "UDP"
+  }
+  else if (proto == 1 || proto == 58)
+  { // ICMP/ICMPv6
+    return "ICMP";
+  }
+
+  return "OTHER";
+}
+
+void parsePorts(const string &input, vector<string> &target)
+{
   istringstream iss(input);
   string port;
-  while (iss >> port) target.push_back(port);
+  while (iss >> port)
+    target.push_back(port);
 }
 
-string join(const vector<string> &list, const string &sep) {
+string join(const vector<string> &list, const string &sep)
+{
   string out;
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (size_t i = 0; i < list.size(); ++i)
+  {
     out += list[i];
-    if (i != list.size() - 1) out += sep;
+    if (i != list.size() - 1)
+      out += sep;
   }
   return out;
 }
 
-void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
+void config(bool mode, const vector<NetworkConfig> &configuredInterfaces)
+{
   namespace fs = filesystem;
   auto root = fs::current_path();
-  auto cfg  = root / "config" / "snort.lua";
+  auto cfg = root / "config" / "snort.lua";
   auto logs = root / "snort_logs";
   fs::create_directories(logs);
 
   ofstream out(cfg);
-  if (!out) {
+  if (!out)
+  {
     cerr << "Failed to open " << cfg << " for writing.\n";
     return;
   }
@@ -562,36 +610,43 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   bool need_ssh = false;
 
   // Check need protocol
-  for (const auto &nc : configuredInterfaces) {
+  for (const auto &nc : configuredInterfaces)
+  {
     home_ips.insert("'" + nc.IP + "'");
-    if (nc.HTTP_SERVERS.value_or(false)) {
+    if (nc.HTTP_SERVERS.value_or(false))
+    {
       need_http = true;
       http_ports.insert(nc.HTTP_PORTS.begin(), nc.HTTP_PORTS.end());
     }
 
-    if (nc.TELNET_SERVERS.value_or(false)) {
+    if (nc.TELNET_SERVERS.value_or(false))
+    {
       need_telnet = true;
       file_ports.insert(nc.FILE_DATA_PORTS.begin(), nc.FILE_DATA_PORTS.end());
     }
 
-    if (nc.FTP_SERVERS.value_or(false)) {
+    if (nc.FTP_SERVERS.value_or(false))
+    {
       need_ftp = true;
       ftp_ports.insert(nc.FTP_PORTS.begin(), nc.FTP_PORTS.end());
     }
 
-    if (nc.SQL_SERVERS.value_or(false)) {
+    if (nc.SQL_SERVERS.value_or(false))
+    {
       need_sql = true;
       oracle_ports.insert(nc.ORACLE_PORTS.begin(), nc.ORACLE_PORTS.end());
     }
 
-    if (nc.SSH_SERVERS.value_or(false)) {
+    if (nc.SSH_SERVERS.value_or(false))
+    {
       need_ssh = true;
       ssh_ports.insert(nc.SSH_PORTS.begin(), nc.SSH_PORTS.end());
     }
   }
 
   // HTTP
-  if (need_http && !http_ports.empty()) {
+  if (need_http && !http_ports.empty())
+  {
     // out << "http_inspect = {\n"
     //        "  request_depth = -1,\n"
     //        "  response_depth = -1,\n"
@@ -601,8 +656,10 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
 
     ostringstream ip_list;
     bool first = true;
-    for (const auto &ip : home_ips) {
-      if (!first) ip_list << ", ";
+    for (const auto &ip : home_ips)
+    {
+      if (!first)
+        ip_list << ", ";
       ip_list << ip;
       first = false;
     }
@@ -610,24 +667,31 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
 
     ostringstream port_list;
     first = true;
-    for (const auto &port : http_ports) {
-      if (!first) port_list << " ";
+    for (const auto &port : http_ports)
+    {
+      if (!first)
+        port_list << " ";
       port_list << port;
       first = false;
     }
     out << "HTTP_PORTS = '" << port_list.str() << "'\n";
-    out << "FILE_DATA_PORTS = HTTP_PORTS .. " " '143 110'\n";
-
-  } else {
+    out << "FILE_DATA_PORTS = HTTP_PORTS .. "
+           " '143 110'\n";
+  }
+  else
+  {
     out << "FILE_DATA_PORTS = '143 110'\n";
   }
 
   // Telnet
-  if (need_telnet && !file_ports.empty()) {
+  if (need_telnet && !file_ports.empty())
+  {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : file_ports) {
-      if (!first) port_list << " ";
+    for (const auto &port : file_ports)
+    {
+      if (!first)
+        port_list << " ";
       port_list << port;
       first = false;
     }
@@ -635,11 +699,14 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   }
 
   // FTP
-  if (need_ftp && !ftp_ports.empty()) {
+  if (need_ftp && !ftp_ports.empty())
+  {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : ftp_ports) {
-      if (!first) port_list << " ";
+    for (const auto &port : ftp_ports)
+    {
+      if (!first)
+        port_list << " ";
       port_list << port;
       first = false;
     }
@@ -647,11 +714,14 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   }
 
   // SQL
-  if (need_sql && !oracle_ports.empty()) {
+  if (need_sql && !oracle_ports.empty())
+  {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : oracle_ports) {
-      if (!first) port_list << " ";
+    for (const auto &port : oracle_ports)
+    {
+      if (!first)
+        port_list << " ";
       port_list << port;
       first = false;
     }
@@ -659,11 +729,14 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   }
 
   // SSH
-  if (need_ssh && !ssh_ports.empty()) {
+  if (need_ssh && !ssh_ports.empty())
+  {
     ostringstream port_list;
     bool first = true;
-    for (const auto &port : ssh_ports) {
-      if (!first) port_list << " ";
+    for (const auto &port : ssh_ports)
+    {
+      if (!first)
+        port_list << " ";
       port_list << port;
       first = false;
     }
@@ -671,19 +744,27 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   }
 
   // HOME_NET
-  if (home_ips.size() > 1) {
+  if (home_ips.size() > 1)
+  {
     out << "HOME_NET = { ";
     bool first = true;
-    for (auto &ip : home_ips) {
-      if (!first) out << ", ";
+    for (auto &ip : home_ips)
+    {
+      if (!first)
+        out << ", ";
       out << ip;
       first = false;
     }
     out << " }\n";
-  } else {
-    if (!home_ips.empty()) {
+  }
+  else
+  {
+    if (!home_ips.empty())
+    {
       out << "HOME_NET = " << *home_ips.begin() << "\n";
-    } else {
+    }
+    else
+    {
       out << "HOME_NET = 'any'\n";
     }
   }
@@ -781,7 +862,8 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
          "    { when = { proto = 'udp', service = 'dcerpc' },  use = { type = 'dce_udp' } },\n"
          "    { when = { proto = 'udp', service = 'netflow' }, use = { type = 'netflow' } },\n\n";
 
-  if (need_http && !http_ports.empty()) {
+  if (need_http && !http_ports.empty())
+  {
     vector<string> ports_vec(http_ports.begin(), http_ports.end());
     string ports_list = join(ports_vec, " "); // เช่น "8000 8080"
     out << "    { when = { proto = 'tcp', ports = \"" << ports_list
@@ -825,16 +907,31 @@ void config(bool mode, const vector<NetworkConfig> &configuredInterfaces) {
   out << "ips = {\n";
   out << "  rules = [[\n";
   out << "    include " << (root / "rules" / "default.rules").string() << "\n";
-  if (need_http)   { out << "    include " << (root / "rules" / "http.rules").string()   << "\n"; }
-  if (need_telnet) { out << "    include " << (root / "rules" / "telnet.rules").string() << "\n"; }
-  if (need_sql)    { out << "    include " << (root / "rules" / "sql.rules").string()    << "\n"; }
-  if (need_ssh)    { out << "    include " << (root / "rules" / "ssh.rules").string()    << "\n"; }
-  if (need_ftp)    { out << "    include " << (root / "rules" / "ftp.rules").string()    << "\n"; }
+  if (need_http)
+  {
+    out << "    include " << (root / "rules" / "http.rules").string() << "\n";
+  }
+  if (need_telnet)
+  {
+    out << "    include " << (root / "rules" / "telnet.rules").string() << "\n";
+  }
+  if (need_sql)
+  {
+    out << "    include " << (root / "rules" / "sql.rules").string() << "\n";
+  }
+  if (need_ssh)
+  {
+    out << "    include " << (root / "rules" / "ssh.rules").string() << "\n";
+  }
+  if (need_ftp)
+  {
+    out << "    include " << (root / "rules" / "ftp.rules").string() << "\n";
+  }
   out << "  ]],\n";
   out << "  mode = '" << (mode ? "inline" : "tap") << "',\n"
-         "  enable_builtin_rules = false,\n"
-         "  variables = default_variables,\n"
-         "}\n\n";
+                                                      "  enable_builtin_rules = false,\n"
+                                                      "  variables = default_variables,\n"
+                                                      "}\n\n";
 
   // Logging
   out << "alert_json = {\n"
