@@ -5,6 +5,7 @@
 #include "./include/flow.h"
 #include "./include/tins/tins.h"
 #include "./include/ids_api.h"
+#include "./include/device.h"
 
 #include <sstream>
 #include <set>
@@ -46,112 +47,69 @@ inline const char *l4_name(uint8_t proto);
 
 int main()
 {
-  // ONNX
-  // IDSContext ctx = ids_init("./artifacts");
-
   vector<string> interfaceName = getInterfaceName();
-  vector<NetworkConfig> configuredInterfaces;
   thread_pool pool(interfaceName.size());
   vector<future<void>> task;
 
   // Select Mode.
-  bool mode;
-  char modeInput;
-  cout << "IPS Mode ? [y/n]" << endl;
-  cin >> modeInput;
-  mode = (modeInput == 'y' || modeInput == 'Y');
+  bool mode = false;
 
   // Config Interface
-  for (const string &iface : interfaceName)
-  {
-    NetworkConfig conf;
-    char yesno;
-    string input;
-
-    conf.NAME = iface;
-    conf.IP = getIpInterface(iface);
-    conf.HOME_NET = getIpInterface(iface);
-    conf.EXTERNAL_NET = "!" + *conf.HOME_NET;
-
-    cout << "\nConfiguring services for interface: " << iface << "\n";
-
-    auto askService = [&](const string &name, optional<bool> &flag, vector<string> &ports)
-    {
-      cout << name << " Service? [y/n]: ";
-      cin >> yesno;
-      cin.ignore(numeric_limits<streamsize>::max(), '\n');
-      bool enabled = (yesno == 'y' || yesno == 'Y');
-      flag = enabled;
-      if (enabled)
-      {
-        cout << "Enter " << name << " port(s) (space separated): ";
-        getline(cin, input);
-        parsePorts(input, ports);
-      }
-    };
-
-    askService("HTTP", conf.HTTP_SERVERS, conf.HTTP_PORTS);
-    askService("SSH", conf.SSH_SERVERS, conf.SSH_PORTS);
-    askService("FTP", conf.FTP_SERVERS, conf.FTP_PORTS);
-    askService("Oracle", conf.SQL_SERVERS, conf.ORACLE_PORTS);
-    askService("TELNET", conf.TELNET_SERVERS, conf.FILE_DATA_PORTS);
-
-    configuredInterfaces.push_back(conf);
-  }
+  vector<NetworkConfig> configuredInterfaces = getDevices();;
 
   // Create Config File
-  config(mode, configuredInterfaces);
+  // config(mode, configuredInterfaces);
 
   // Create Snort Process
-  pid_t pid = fork();
-  if (pid == 0)
-  {
-    vector<char *> argv;
+  // pid_t pid = fork();
+  // if (pid == 0)
+  // {
+  //   vector<char *> argv;
 
-    argv.push_back(strdup("sudo"));
-    argv.push_back(strdup("snort"));
+  //   argv.push_back(strdup("sudo"));
+  //   argv.push_back(strdup("snort"));
 
-    argv.push_back(strdup("--snaplen"));
-    argv.push_back(strdup("65535"));
+  //   argv.push_back(strdup("--snaplen"));
+  //   argv.push_back(strdup("65535"));
 
-    argv.push_back(strdup("--daq-dir"));
-    argv.push_back(strdup("/usr/local/lib/daq"));
-    argv.push_back(strdup("--daq"));
-    argv.push_back(strdup("afpacket"));
-    argv.push_back(strdup("--daq-mode"));
-    argv.push_back(strdup("passive"));
+  //   argv.push_back(strdup("--daq-dir"));
+  //   argv.push_back(strdup("/usr/local/lib/daq"));
+  //   argv.push_back(strdup("--daq"));
+  //   argv.push_back(strdup("afpacket"));
+  //   argv.push_back(strdup("--daq-mode"));
+  //   argv.push_back(strdup("passive"));
 
-    // Interface
-    for (const auto &ifn : interfaceName)
-    {
-      argv.push_back(strdup("-i"));
-      argv.push_back(strdup(ifn.c_str()));
-    }
+  //   // Interface
+  //   for (const auto &ifn : interfaceName)
+  //   {
+  //     argv.push_back(strdup("-i"));
+  //     argv.push_back(strdup(ifn.c_str()));
+  //   }
 
-    // Thread
-    argv.push_back(strdup("--max-packet-threads"));
-    argv.push_back(strdup(to_string(interfaceName.size()).c_str()));
+  //   // Thread
+  //   argv.push_back(strdup("--max-packet-threads"));
+  //   argv.push_back(strdup(to_string(interfaceName.size()).c_str()));
 
-    argv.push_back(strdup("-c"));
-    argv.push_back(strdup("./config/snort.lua"));
-    argv.push_back(strdup("-A"));
-    argv.push_back(strdup("alert_json"));
-    argv.push_back(strdup("-l"));
-    argv.push_back(strdup("./snort_logs"));
-    argv.push_back(nullptr);
+  //   argv.push_back(strdup("-c"));
+  //   argv.push_back(strdup("./config/snort.lua"));
+  //   argv.push_back(strdup("-A"));
+  //   argv.push_back(strdup("alert_json"));
+  //   argv.push_back(strdup("-l"));
+  //   argv.push_back(strdup("./snort_logs"));
+  //   argv.push_back(nullptr);
 
-    cout << "[Snort command] ";
-    for (char *arg : argv)
-    {
-      if (arg != nullptr)
-        cout << arg << " ";
-    }
-    cout << endl;
+  //   cout << "[Snort command] ";
+  //   for (char *arg : argv)
+  //   {
+  //     if (arg != nullptr)
+  //       cout << arg << " ";
+  //   }
+  //   cout << endl;
 
-    execvp("sudo", argv.data());
-    perror("execvp failed");
-    _exit(1);
-  }
+  //   execvp("sudo", argv.data());
+  //   perror("execvp failed");
+  //   _exit(1);
+  // }
   // User for wait snort
   // else if (pid > 0)
   // {
@@ -178,18 +136,18 @@ void sniff(NetworkConfig &conf)
 {
 
   // Initial Log Variable
-  string currentDay = currentDate();
-  string currentTime = timeStamp();
-  string currentPath = "./logs/" + getPath();
-  filesystem::create_directories(currentPath);
-  auto writer = make_unique<PacketWriter>(
-      currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap",
-      DataLinkType<EthernetII>());
+  // string currentDay = currentDate();
+  // string currentTime = timeStamp();
+  // string currentPath = "./logs/" + getPath();
+  // filesystem::create_directories(currentPath);
+  // auto writer = make_unique<PacketWriter>(
+  //     currentPath + conf.NAME + "_" + currentDay + "_" + currentTime + ".pcap",
+  //     DataLinkType<EthernetII>());
 
   // Sniffer
   SnifferConfiguration cfg;
   cfg.set_promisc_mode(true);
-  Sniffer sniffer(conf.NAME, cfg);
+  FileSniffer sniffer("/home/fruitto/Downloads/File/Dataset/cic-ids2017-pcap/Thursday/Thursday-WorkingHours.pcap");
 
   // ONNX
   IDSContext ctx = ids_init("./artifacts");
@@ -206,21 +164,20 @@ void sniff(NetworkConfig &conf)
 
   sniffer.sniff_loop([&](Packet &pkt)
                      {
-    // --- Rotate PCAP daily (ใช้รูปแบบไฟล์เดียวกันทุกครั้ง) ---
-    string date = currentDate();
-    string path = getPath();
-    if (currentDay != date) {
-      currentDay  = date;
-      currentPath = path;
-      filesystem::create_directories(currentPath);
-      string ts = timeStamp();
-      writer = make_unique<PacketWriter>(
-          currentPath + conf.NAME + "_" + currentDay + "_" + ts + ".pcap",
-          DataLinkType<EthernetII>());
-    }
-    writer->write(pkt);
+    // Write Logs
+    // string date = currentDate();
+    // string path = getPath();
+    // if (currentDay != date) {
+    //   currentDay  = date;
+    //   currentPath = path;
+    //   filesystem::create_directories(currentPath);
+    //   string ts = timeStamp();
+    //   writer = make_unique<PacketWriter>(
+    //       currentPath + conf.NAME + "_" + currentDay + "_" + ts + ".pcap",
+    //       DataLinkType<EthernetII>());
+    // }
+    // writer->write(pkt);
 
-    // --- Parse L3 (IPv4/IPv6) + L4 ---
     PDU* pdu = pkt.pdu();
     if (!pdu) return true;
 
