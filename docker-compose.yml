@@ -1,0 +1,9 @@
+version: "3"
+services:
+  app:
+    build: .
+    volumes:
+      - ./data:/app
+    tty: true          # เหมือน -t
+    stdin_open: true   # เหมือน -i
+    command: bash -l   # เปิดเชลล์แบบ login

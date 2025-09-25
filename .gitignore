@@ -9,3 +9,7 @@ config/snort.lua
 main_exe
 
 snort_logs/
+
+data/
+
+.vscode/
